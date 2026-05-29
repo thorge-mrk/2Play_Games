@@ -33,11 +33,11 @@ jobs:
       run: |
         mkdir Payload
         cp -r build/ios/iphoneos/Runner.app Payload/
-        zip -r Orately-Unsigned.ipa Payload
+        zip -r 2Play.ipa Payload
         rm -rf Payload
 
     - name: Upload IPA Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: 2PlayGames-IPA
-        path: 2PlayGames.ipa
+        name: 2Play-iOS-Unsigned-IPA
+        path: 2Play.ipa
