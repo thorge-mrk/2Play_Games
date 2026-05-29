@@ -293,7 +293,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
                           borderRadius: 20,
                           gradientColors: connService.isAdvertising
                               ? AppTheme.primaryGradient
-                              : (isDark ? AppTheme.liquidGlassDarkGradient : AppTheme.liquidGlassLightGradient),
+                              : null,
                           child: Column(
                             children: [
                               Icon(
@@ -342,7 +342,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
                           borderRadius: 20,
                           gradientColors: connService.isScanning
                               ? AppTheme.neonBlueGradient
-                              : (isDark ? AppTheme.liquidGlassDarkGradient : AppTheme.liquidGlassLightGradient),
+                              : null,
                           child: Column(
                             children: [
                               Icon(

@@ -7,6 +7,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import '../services/connectivity_service.dart';
 import '../theme/app_theme.dart';
 import '../models/minigolf_levels.dart';
+import '../widgets/chat_sheet.dart';
 
 class MinigolfScreen extends StatefulWidget {
   const MinigolfScreen({super.key});
@@ -576,9 +577,56 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
                         ),
                       ],
                     ),
-                    IconButton(
-                      icon: Icon(Icons.replay_rounded, color: isDark ? Colors.white70 : Colors.black87),
-                      onPressed: _resetLevel,
+                    Row(
+                      children: [
+                        IconButton(
+                          icon: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Icon(Icons.chat_bubble_rounded, color: isDark ? Colors.white70 : Colors.black87, size: 24),
+                              if (connService.unreadChatCount > 0)
+                                Positioned(
+                                  right: -4,
+                                  top: -4,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFF007F),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: isDark ? const Color(0xFF0F0B1E) : Colors.white, width: 1.5),
+                                    ),
+                                    constraints: const BoxConstraints(
+                                      minWidth: 16,
+                                      minHeight: 16,
+                                    ),
+                                    child: Text(
+                                      '${connService.unreadChatCount}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 8,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          onPressed: () {
+                            showModalBottomSheet(
+                              context: context,
+                              isScrollControlled: true,
+                              backgroundColor: Colors.transparent,
+                              builder: (_) => const ChatSheet(),
+                            );
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: Icon(Icons.replay_rounded, color: isDark ? Colors.white70 : Colors.black87),
+                          onPressed: _resetLevel,
+                        ),
+                      ],
                     ),
                   ],
                 ),

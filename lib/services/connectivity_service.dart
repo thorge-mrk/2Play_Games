@@ -39,6 +39,20 @@ class AppPeer {
   }
 }
 
+class ChatMessage {
+  final String senderName;
+  final String text;
+  final DateTime timestamp;
+  final bool isMe;
+
+  ChatMessage({
+    required this.senderName,
+    required this.text,
+    required this.timestamp,
+    required this.isMe,
+  });
+}
+
 enum AppConnectivityMode {
   real,
   simulated
@@ -74,6 +88,36 @@ class ConnectivityService extends ChangeNotifier {
   // Active game syncing
   String? _activeGameId;
   String? get activeGameId => _activeGameId;
+
+  // Chat support
+  final List<ChatMessage> _chatMessages = [];
+  int _unreadChatCount = 0;
+
+  List<ChatMessage> get chatMessages => _chatMessages;
+  int get unreadChatCount => _unreadChatCount;
+
+  void sendChatMessage(String text) {
+    if (!isConnected) return;
+    
+    _chatMessages.add(ChatMessage(
+      senderName: _myUsername,
+      text: text,
+      timestamp: DateTime.now(),
+      isMe: true,
+    ));
+    notifyListeners();
+
+    sendPayload({
+      'type': 'chat_message',
+      'senderName': _myUsername,
+      'text': text,
+    });
+  }
+
+  void clearUnreadChatCount() {
+    _unreadChatCount = 0;
+    notifyListeners();
+  }
 
   // Streams for screens to listen to
   final _messageController = StreamController<Map<String, dynamic>>.broadcast();
@@ -231,7 +275,7 @@ class ConnectivityService extends ChangeNotifier {
   }
 
   Future<void> invitePeer(AppPeer peer) async {
-    _isHost = true; // We initiated
+    _isHost = false; // We joined/invited their lobby, so remote is host
     _updatePeerState(peer.id, PeerState.connecting);
 
     if (_mode == AppConnectivityMode.real) {
@@ -252,7 +296,7 @@ class ConnectivityService extends ChangeNotifier {
   }
 
   Future<void> acceptInvite(AppPeer peer) async {
-    _isHost = false; // We accepted, remote is host
+    _isHost = true; // We created the lobby (advertised), so we are host
     _updatePeerState(peer.id, PeerState.connecting);
 
     if (_mode == AppConnectivityMode.real) {
@@ -286,6 +330,8 @@ class ConnectivityService extends ChangeNotifier {
 
     _connectedPeer = null;
     _activeGameId = null;
+    _chatMessages.clear();
+    _unreadChatCount = 0;
     _updatePeerState(peerId, PeerState.notConnected);
     notifyListeners();
   }
@@ -362,9 +408,10 @@ class ConnectivityService extends ChangeNotifier {
           if (state == PeerState.connected) {
             _connectedPeer = appPeer;
             // The advertiser/browser logic maps who is host
-            // If we were scanning, we invited, hence host
-            if (_isScanning) _isHost = true;
-            if (_isAdvertising) _isHost = false;
+            // If we were scanning, we invited, hence we are guest
+            if (_isScanning) _isHost = false;
+            // If we were advertising, they invited us, hence we are host
+            if (_isAdvertising) _isHost = true;
           }
           return appPeer;
         }).toList();
@@ -409,6 +456,17 @@ class ConnectivityService extends ChangeNotifier {
       notifyListeners();
     } else if (type == 'game_exit') {
       _activeGameId = null;
+      notifyListeners();
+    } else if (type == 'chat_message') {
+      final senderName = payload['senderName'] as String? ?? 'Gegner';
+      final text = payload['text'] as String? ?? '';
+      _chatMessages.add(ChatMessage(
+        senderName: senderName,
+        text: text,
+        timestamp: DateTime.now(),
+        isMe: false,
+      ));
+      _unreadChatCount++;
       notifyListeners();
     }
     
@@ -469,6 +527,31 @@ class ConnectivityService extends ChangeNotifier {
           'type': 'game_reset_accept',
           'gameId': payload['gameId'],
         });
+      });
+    } else if (type == 'chat_message') {
+      // Simulate opponent typing and replying after 1-2 seconds
+      Timer(Duration(seconds: 1 + _random.nextInt(2)), () {
+        if (!isConnected) return;
+        final aiReplies = [
+          'Gutes Spiel!',
+          'Huch, das war knapp!',
+          'Haha, nett versucht!',
+          'Bereit für die nächste Runde?',
+          'Schöne Grüße!',
+          'Wow, du spielst echt gut!',
+          'Kannst du das noch mal machen?',
+          'Gleich habe ich dich!',
+          'Ein toller Tag für 2Play!',
+          'Spielen wir danach noch was anderes?',
+        ];
+        final replyText = aiReplies[_random.nextInt(aiReplies.length)];
+        
+        final replyPayload = {
+          'type': 'chat_message',
+          'senderName': connectedPeer?.name ?? 'Gegner',
+          'text': replyText,
+        };
+        _handleIncomingPayload(replyPayload);
       });
     }
   }

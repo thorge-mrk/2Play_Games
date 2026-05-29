@@ -9,6 +9,7 @@ import 'connectfour_screen.dart';
 import 'battleship_screen.dart';
 import 'rockpaperscissors_screen.dart';
 import 'minigolf_screen.dart';
+import '../widgets/chat_sheet.dart';
 
 class GameSelectionScreen extends StatefulWidget {
   const GameSelectionScreen({super.key});
@@ -29,7 +30,9 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
     _msgSubscription = connService.messageStream.listen((payload) {
       if (payload['type'] == 'game_select') {
         final gameId = payload['gameId'] as String;
-        _navigateToGame(gameId);
+        if (!connService.isHost) {
+          _navigateToGame(gameId);
+        }
       }
     });
   }
@@ -167,19 +170,66 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
                         ),
                       ],
                     ),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red.withOpacity(0.1),
-                        foregroundColor: Colors.redAccent,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                    Row(
+                      children: [
+                        IconButton(
+                          icon: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Icon(Icons.chat_bubble_rounded, color: isDark ? Colors.white70 : Colors.black87, size: 26),
+                              if (connService.unreadChatCount > 0)
+                                Positioned(
+                                  right: -4,
+                                  top: -4,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFF007F),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: isDark ? const Color(0xFF0F0B1E) : Colors.white, width: 1.5),
+                                    ),
+                                    constraints: const BoxConstraints(
+                                      minWidth: 16,
+                                      minHeight: 16,
+                                    ),
+                                    child: Text(
+                                      '${connService.unreadChatCount}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          onPressed: () {
+                            showModalBottomSheet(
+                              context: context,
+                              isScrollControlled: true,
+                              backgroundColor: Colors.transparent,
+                              builder: (_) => const ChatSheet(),
+                            );
+                          },
                         ),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      ),
-                      onPressed: () => connService.disconnect(),
-                      icon: const Icon(Icons.power_settings_new_rounded, size: 16),
-                      label: const Text('Trennen', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        const SizedBox(width: 8),
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red.withOpacity(0.1),
+                            foregroundColor: Colors.redAccent,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          ),
+                          onPressed: () => connService.disconnect(),
+                          icon: const Icon(Icons.power_settings_new_rounded, size: 16),
+                          label: const Text('Trennen', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -254,7 +304,12 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
                     final canInteract = connService.isHost;
 
                     return GestureDetector(
-                      onTap: canInteract ? () => connService.selectGame(game['id'] as String) : null,
+                      onTap: canInteract
+                          ? () {
+                              connService.selectGame(game['id'] as String);
+                              _navigateToGame(game['id'] as String);
+                            }
+                          : null,
                       child: Opacity(
                         opacity: canInteract ? 1.0 : 0.6,
                         child: GlassContainer(
