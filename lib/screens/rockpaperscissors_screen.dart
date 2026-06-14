@@ -193,7 +193,6 @@ class _RockPaperScissorsScreenState extends State<RockPaperScissorsScreen> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
-        final isDark = Theme.of(context).brightness == Brightness.dark;
         return AlertDialog(
           backgroundColor: Colors.transparent,
           contentPadding: EdgeInsets.zero,
@@ -530,22 +529,6 @@ class _RockPaperScissorsScreenState extends State<RockPaperScissorsScreen> {
       ),
     );
   }
-
-  Widget _buildNextRoundButton() {
-    return ElevatedButton.icon(
-      style: ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xFF8A2387),
-        foregroundColor: Colors.white,
-        minimumSize: const Size(200, 50),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        elevation: 4,
-      ),
-      onPressed: _requestReset,
-      icon: const Icon(Icons.replay_rounded),
-      label: const Text('Nächste Runde', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-    ).animate().scaleXY(begin: 0.8, end: 1.0, duration: 250.ms, curve: Curves.bounceOut);
-  }
-
   Widget _buildRevealArea(bool isDark) {
     String emoji(String? choice) {
       if (choice == 'rock') return '✊';

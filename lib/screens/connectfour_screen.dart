@@ -234,7 +234,6 @@ class _ConnectFourScreenState extends State<ConnectFourScreen> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
-        final isDark = Theme.of(context).brightness == Brightness.dark;
         return AlertDialog(
           backgroundColor: Colors.transparent,
           contentPadding: EdgeInsets.zero,

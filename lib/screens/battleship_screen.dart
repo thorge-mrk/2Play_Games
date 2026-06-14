@@ -101,11 +101,7 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
             _checkWinState();
           });
         } else if (subtype == 'ai_fire') {
-          // AI fired at us
-          final tx = data['targetX'] as int;
-          final ty = data['targetY'] as int;
-          final isHit = data['isHit'] as bool;
-
+          // AI fired at us – board state comes pre-computed from the bot
           setState(() {
             _myBoard = List<List<int>>.from(
               (data['userBoard'] as List).map((row) => List<int>.from(row))
@@ -241,7 +237,6 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
   }
 
   void _checkWinState() {
-    final connService = Provider.of<ConnectivityService>(context, listen: false);
     
     // Total ship squares is 5 + 4 + 3 + 3 + 2 = 17
     int myHits = 0;
@@ -323,7 +318,6 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
-        final isDark = Theme.of(context).brightness == Brightness.dark;
         return AlertDialog(
           backgroundColor: Colors.transparent,
           contentPadding: EdgeInsets.zero,
@@ -390,7 +384,6 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
       return const SizedBox();
     }
 
-    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
 
     return PopScope(
       canPop: false,
