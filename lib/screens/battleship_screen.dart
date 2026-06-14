@@ -498,8 +498,9 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildPlacementView(bool isDark) {
     final remainingShips = _shipSizes.length - _currentShipIndex;
@@ -1133,7 +1134,7 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
           ),
         ),
       ),
-    ));
+    );
   }
 
   Widget _buildBotDifficultySwitcher(ConnectivityService connService) {
@@ -1145,7 +1146,7 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.08),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white15),
+        border: Border.all(color: Colors.white.withOpacity(0.15)),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
