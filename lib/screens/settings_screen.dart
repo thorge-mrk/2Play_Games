@@ -282,6 +282,126 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                     const SizedBox(height: 28),
 
+                    // Section: Known Players
+                    _buildSectionHeader(context, 'BEKANNTE SPIELER'),
+                    const SizedBox(height: 12),
+                    GlassContainer(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.people_rounded, color: Color(0xFF39FF14)),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Text(
+                                  'Gespeicherte Spieler',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: isDark ? Colors.white : Colors.black87,
+                                  ),
+                                ),
+                              ),
+                              if (connService.knownPlayers.isNotEmpty)
+                                TextButton(
+                                  onPressed: () {
+                                    showDialog(
+                                      context: context,
+                                      builder: (ctx) => AlertDialog(
+                                        title: const Text('Alle löschen?'),
+                                        content: const Text(
+                                            'Alle bekannten Spieler werden gelöscht. Bei der nächsten Verbindung ist eine PIN-Verifizierung erforderlich.'),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.of(ctx).pop(),
+                                            child: const Text('Abbrechen'),
+                                          ),
+                                          TextButton(
+                                            onPressed: () {
+                                              Navigator.of(ctx).pop();
+                                              connService.clearKnownPlayers();
+                                            },
+                                            child: const Text('Löschen',
+                                                style: TextStyle(color: Colors.red)),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: Colors.redAccent,
+                                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                                  ),
+                                  child: const Text('Alle löschen', style: TextStyle(fontSize: 12)),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          if (connService.knownPlayers.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Text(
+                                'Noch keine bekannten Spieler. Verbinde dich mit anderen Spielern, um sie hier zu speichern.',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: isDark ? Colors.white38 : Colors.black38,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                            )
+                          else
+                            ...connService.knownPlayers.map((player) {
+                              final name = player['name'] ?? 'Spieler';
+                              final id = player['id'] ?? '';
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 36,
+                                      height: 36,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: const Color(0xFF39FF14).withOpacity(0.12),
+                                      ),
+                                      child: const Icon(
+                                        Icons.person_rounded,
+                                        size: 18,
+                                        color: Color(0xFF39FF14),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        name,
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: isDark ? Colors.white : Colors.black87,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.remove_circle_outline_rounded,
+                                          size: 20, color: Colors.redAccent),
+                                      tooltip: 'Entfernen',
+                                      onPressed: () => connService.removeKnownPlayer(id),
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }),
+                        ],
+                      ),
+                    ).animate().fadeIn(delay: 250.ms, duration: 400.ms),
+
+                    const SizedBox(height: 28),
+
                     // Section: Statistics
                     _buildSectionHeader(context, 'STATISTIKEN'),
                     const SizedBox(height: 12),
@@ -342,19 +462,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
                                   Text(
-                                    entry.key == 'tictactoe'
-                                        ? 'Tic-Tac-Toe'
-                                        : (entry.key == 'connect4'
-                                            ? 'Vier Gewinnt'
-                                            : (entry.key == 'battleship'
-                                                ? 'Schiffe Versenken'
-                                                : (entry.key == 'rockpaperscissors'
-                                                    ? 'Schere, Stein, Papier'
-                                                    : 'Minigolf'))),
+                                    _gameDisplayName(entry.key),
                                     style: const TextStyle(fontSize: 13),
                                   ),
                                   Text(
-                                    'Siege: ${entry.value['wins_vs_bot']! + entry.value['wins_vs_player']!} | Niederlagen: ${entry.value['losses_vs_bot']! + entry.value['losses_vs_player']!}',
+                                    'S: ${(entry.value['wins_vs_bot'] ?? 0) + (entry.value['wins_vs_player'] ?? 0)}  N: ${(entry.value['losses_vs_bot'] ?? 0) + (entry.value['losses_vs_player'] ?? 0)}',
                                     style: TextStyle(
                                       fontSize: 12,
                                       color: isDark ? Colors.white54 : Colors.black54,
@@ -375,6 +487,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
     );
+  }
+
+  String _gameDisplayName(String key) {
+    switch (key) {
+      case 'tictactoe': return 'Tic-Tac-Toe';
+      case 'connect4': return 'Vier Gewinnt';
+      case 'battleship': return 'Schiffe Versenken';
+      case 'rockpaperscissors': return 'Schere, Stein, Papier';
+      case 'minigolf': return 'Minigolf';
+      default: return key;
+    }
   }
 
   Widget _buildSectionHeader(BuildContext context, String title) {
