@@ -27,6 +27,9 @@ class _RockPaperScissorsScreenState extends State<RockPaperScissorsScreen> {
   bool _isGameOver = false;
   String _winner = '';
   bool _waitingForResetAccept = false;
+  bool _isSubmittingChoice = false;
+  bool _statsUpdated = false;
+  Timer? _autoProgressTimer;
 
   @override
   void initState() {
@@ -41,7 +44,7 @@ class _RockPaperScissorsScreenState extends State<RockPaperScissorsScreen> {
           // If we receive the AI/Opponent choice
           _opponentChoice = data['aiChoice'] as String?;
           // If it is a real opponent, they might send their choice first, or we wait till both are set
-          if (connService.mode == AppConnectivityMode.real) {
+          if (connService.connectedPeer?.isMock != true) {
             _opponentChoice = data['userChoice'] as String?;
           }
           
@@ -64,11 +67,13 @@ class _RockPaperScissorsScreenState extends State<RockPaperScissorsScreen> {
   @override
   void dispose() {
     _msgSubscription?.cancel();
+    _autoProgressTimer?.cancel();
     super.dispose();
   }
 
   void _choose(String choice) {
-    if (_myChoice != null) return; // Choice already locked
+    if (_myChoice != null || _isSubmittingChoice) return;
+    _isSubmittingChoice = true;
 
     setState(() {
       _myChoice = choice;
@@ -89,11 +94,25 @@ class _RockPaperScissorsScreenState extends State<RockPaperScissorsScreen> {
   }
 
   void _checkReveal() {
-    if (_myChoice != null && _opponentChoice != null) {
+    if (_myChoice != null && _opponentChoice != null && !_revealed) {
       setState(() {
         _revealed = true;
         _evaluateRound();
       });
+      _updateStats();
+
+      // Start 3-second timer for auto-progression
+      if (!_isGameOver) {
+        _autoProgressTimer?.cancel();
+        _autoProgressTimer = Timer(const Duration(seconds: 3), () {
+          if (mounted) {
+            final connService = Provider.of<ConnectivityService>(context, listen: false);
+            if (connService.isHost || (connService.connectedPeer?.isMock ?? false)) {
+              _requestReset();
+            }
+          }
+        });
+      }
     }
   }
 
@@ -119,6 +138,20 @@ class _RockPaperScissorsScreenState extends State<RockPaperScissorsScreen> {
     }
   }
 
+  void _updateStats() {
+    if (_statsUpdated) return;
+    if (_isGameOver) {
+      final connService = Provider.of<ConnectivityService>(context, listen: false);
+      if (_winner == 'Du') {
+        connService.incrementWin('rockpaperscissors');
+        _statsUpdated = true;
+      } else if (_winner == 'Gegner') {
+        connService.incrementLoss('rockpaperscissors');
+        _statsUpdated = true;
+      }
+    }
+  }
+
   void _resetRound() {
     setState(() {
       _myChoice = null;
@@ -126,11 +159,13 @@ class _RockPaperScissorsScreenState extends State<RockPaperScissorsScreen> {
       _revealed = false;
       _roundResult = '';
       _waitingForResetAccept = false;
+      _isSubmittingChoice = false;
       if (_isGameOver) {
         _myScore = 0;
         _opponentScore = 0;
         _isGameOver = false;
         _winner = '';
+        _statsUpdated = false;
       }
     });
   }
@@ -145,12 +180,71 @@ class _RockPaperScissorsScreenState extends State<RockPaperScissorsScreen> {
     });
   }
 
-  void _exitGame() {
-    final connService = Provider.of<ConnectivityService>(context, listen: false);
-    if (connService.isHost) {
-      connService.exitGame();
+  void _exitGame() async {
+    final shouldExit = await _showExitConfirmationDialog();
+    if (shouldExit) {
+      final connService = Provider.of<ConnectivityService>(context, listen: false);
+      connService.disconnect();
     }
-    Navigator.of(context).pop();
+  }
+
+  Future<bool> _showExitConfirmationDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: Colors.transparent,
+          contentPadding: EdgeInsets.zero,
+          content: GlassContainer(
+            padding: const EdgeInsets.all(24),
+            borderRadius: 24,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.warning_amber_rounded,
+                  size: 48,
+                  color: Colors.redAccent,
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Spiel beenden?',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Möchtest du das Spiel wirklich beenden? Dies bricht das Spiel für beide Spieler ab und trennt die Verbindung.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(false),
+                      child: const Text('Nein, weiterspielen', style: TextStyle(color: Colors.white70)),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: () => Navigator.of(ctx).pop(true),
+                      child: const Text('Ja, beenden'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    return result ?? false;
   }
 
   @override
@@ -168,8 +262,14 @@ class _RockPaperScissorsScreenState extends State<RockPaperScissorsScreen> {
 
     final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
 
-    return Scaffold(
-      body: Container(
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) async {
+        if (didPop) return;
+        _exitGame();
+      },
+      child: Scaffold(
+        body: Container(
         decoration: BoxDecoration(
           gradient: isDark
               ? const LinearGradient(
@@ -201,11 +301,16 @@ class _RockPaperScissorsScreenState extends State<RockPaperScissorsScreen> {
                                 const SizedBox(height: 12),
                                 _buildScoreboard(isDark, connService),
                                 const SizedBox(height: 24),
-                                if (_revealed && !_isGameOver)
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                                    child: _buildNextRoundButton(),
-                                  ),
+                                 if (_revealed && !_isGameOver)
+                                   const Padding(
+                                     padding: EdgeInsets.symmetric(horizontal: 20.0),
+                                     child: Center(
+                                       child: Text(
+                                         'Nächste Runde startet automatisch...',
+                                         style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey),
+                                       ),
+                                     ),
+                                   ),
                               ],
                             ),
                           ),
@@ -242,15 +347,52 @@ class _RockPaperScissorsScreenState extends State<RockPaperScissorsScreen> {
                         if (!_revealed)
                           _buildChoicesRow(context)
                         else
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                            child: _buildNextRoundButton(),
+                          const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 20.0),
+                            child: Center(
+                              child: Text(
+                                'Nächste Runde startet automatisch...',
+                                style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey),
+                              ),
+                            ),
                           ),
                         const Spacer(),
                       ],
                     ),
             ),
             if (_isGameOver) _buildGameOverOverlay(context, isDark, connService),
+          ],
+        ),
+      ),
+    ));
+  }
+
+  Widget _buildBotDifficultySwitcher(ConnectivityService connService) {
+    if (connService.connectedPeer?.isMock != true) return const SizedBox();
+    
+    return Container(
+      margin: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white15),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: connService.botDifficulty,
+          dropdownColor: AppTheme.darkCard,
+          icon: const Icon(Icons.arrow_drop_down, color: Colors.white70, size: 18),
+          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+          onChanged: (val) {
+            if (val != null) {
+              connService.setBotDifficulty(val);
+            }
+          },
+          items: const [
+            DropdownMenuItem(value: 'einfach', child: Text('🤖 Einfach')),
+            DropdownMenuItem(value: 'mittel', child: Text('🤖 Mittel')),
+            DropdownMenuItem(value: 'schwer', child: Text('🤖 Schwer')),
           ],
         ),
       ),
@@ -268,14 +410,19 @@ class _RockPaperScissorsScreenState extends State<RockPaperScissorsScreen> {
             icon: Icon(Icons.arrow_back_ios_new_rounded, color: isDark ? Colors.white70 : Colors.black87),
             onPressed: _exitGame,
           ),
-          Text(
-            'Schere, Stein, Papier',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: isDark ? Colors.white : Colors.black87,
+          Expanded(
+            child: Center(
+              child: Text(
+                'Schere, Stein, Papier',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
             ),
           ),
+          _buildBotDifficultySwitcher(connService),
           IconButton(
             icon: Stack(
               clipBehavior: Clip.none,

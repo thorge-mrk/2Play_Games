@@ -63,14 +63,25 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
   static const String _keyDarkMode = 'two_play_dark_mode';
   static const String _keyMode = 'two_play_conn_mode';
   static const String _keyKnownPlayers = 'two_play_known_players';
+  static const String _keyBotDifficulty = 'two_play_bot_difficulty';
+  static const String _keyGameStats = 'two_play_game_stats';
+  static const String _keyPlayTime = 'two_play_play_time';
 
   String _myUsername = 'Player';
   bool _isDarkMode = true;
-  AppConnectivityMode _mode = AppConnectivityMode.simulated;
+  AppConnectivityMode _mode = AppConnectivityMode.real; // Default to real P2P
 
   String get myUsername => _myUsername;
   bool get isDarkMode => _isDarkMode;
   AppConnectivityMode get mode => _mode;
+
+  // Bot difficulty
+  String _botDifficulty = 'mittel';
+  String get botDifficulty => _botDifficulty;
+
+  // Blocked players (ID -> Unblock Time)
+  final Map<String, DateTime> _blockedPlayers = {};
+  Map<String, DateTime> get blockedPlayers => _blockedPlayers;
 
   // Connection states
   bool _isAdvertising = false;
@@ -78,13 +89,101 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
   List<AppPeer> _discoveredPeers = [];
   AppPeer? _connectedPeer;
   bool _isHost = false;
+  bool _showMockBots = false;
+  Timer? _botTimer;
 
   bool get isAdvertising => _isAdvertising;
   bool get isScanning => _isScanning;
-  List<AppPeer> get discoveredPeers => _discoveredPeers;
+  
+  // Filter out blocked players and format Bot difficulty labels
+  List<AppPeer> get discoveredPeers {
+    final now = DateTime.now();
+    final filtered = _discoveredPeers.where((peer) {
+      if (_blockedPlayers.containsKey(peer.id)) {
+        final unblockTime = _blockedPlayers[peer.id]!;
+        if (now.isBefore(unblockTime)) {
+          return false; // Blocked!
+        }
+      }
+      return true;
+    }).toList();
+
+    final realPeers = filtered.where((p) => !p.isMock).toList();
+    final mockPeers = filtered.where((p) => p.isMock).toList();
+
+    List<AppPeer> listToReturn;
+    if (realPeers.isNotEmpty) {
+      listToReturn = realPeers;
+    } else if (_showMockBots) {
+      listToReturn = mockPeers.isNotEmpty ? mockPeers : _getMockBotsList();
+    } else {
+      listToReturn = [];
+    }
+
+    return listToReturn.map((peer) {
+      if (peer.isMock) {
+        String difficultyLabel = 'Mittel';
+        if (_botDifficulty == 'einfach') difficultyLabel = 'Einfach';
+        if (_botDifficulty == 'schwer') difficultyLabel = 'Schwer';
+        
+        final cleanName = peer.name.split(' [')[0];
+        return peer.copyWith(name: '$cleanName [$difficultyLabel]');
+      }
+      return peer;
+    }).toList();
+  }
+
+  List<AppPeer> _getMockBotsList() {
+    return [
+      AppPeer(id: 'mock_bot_einfach', name: 'Bot AeroGamer', state: PeerState.notConnected, isMock: true),
+      AppPeer(id: 'mock_bot_mittel', name: 'Bot QuantumPlay', state: PeerState.notConnected, isMock: true),
+      AppPeer(id: 'mock_bot_schwer', name: 'Bot CyberGlow', state: PeerState.notConnected, isMock: true),
+    ];
+  }
+
   AppPeer? get connectedPeer => _connectedPeer;
   bool get isConnected => _connectedPeer?.state == PeerState.connected;
   bool get isHost => _isHost;
+
+  // Verification PIN handshake state
+  bool _isVerifying = false;
+  int? _verificationPin;
+  bool _pinError = false;
+  String? _pinErrorMessage;
+
+  bool get isVerifying => _isVerifying;
+  int? get verificationPin => _verificationPin;
+  bool get pinError => _pinError;
+  String? get pinErrorMessage => _pinErrorMessage;
+
+  // Statistics
+  Map<String, Map<String, int>> _gameStats = {};
+  int _totalPlayTimeSeconds = 0;
+  DateTime? _gameStartTime;
+
+  Map<String, Map<String, int>> get gameStats => _gameStats;
+  int get totalPlayTimeSeconds => _totalPlayTimeSeconds;
+
+  String get favoriteGame {
+    String bestGame = 'Keines';
+    int maxPlays = -1;
+    final gameNames = {
+      'tictactoe': 'Tic-Tac-Toe',
+      'connect4': 'Vier Gewinnt',
+      'battleship': 'Schiffe Versenken',
+      'rockpaperscissors': 'Schere, Stein, Papier',
+      'minigolf': 'Minigolf',
+    };
+    
+    _gameStats.forEach((gameId, stats) {
+      final plays = stats['play_count'] ?? 0;
+      if (plays > maxPlays && plays > 0) {
+        maxPlays = plays;
+        bestGame = gameNames[gameId] ?? gameId;
+      }
+    });
+    return bestGame;
+  }
 
   // Active game syncing
   String? _activeGameId;
@@ -172,9 +271,26 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
     final prefs = await SharedPreferences.getInstance();
     _myUsername = prefs.getString(_keyUsername) ?? 'Player_${_random.nextInt(900) + 100}';
     _isDarkMode = prefs.getBool(_keyDarkMode) ?? true;
-    final modeStr = prefs.getString(_keyMode);
-    if (modeStr != null) {
-      _mode = modeStr == 'real' ? AppConnectivityMode.real : AppConnectivityMode.simulated;
+    _mode = AppConnectivityMode.real; // Always real by default, we are P2P first
+
+    _botDifficulty = prefs.getString(_keyBotDifficulty) ?? 'mittel';
+    _totalPlayTimeSeconds = prefs.getInt(_keyPlayTime) ?? 0;
+    
+    // Load game stats
+    final statsJson = prefs.getString(_keyGameStats);
+    if (statsJson != null) {
+      try {
+        final decoded = jsonDecode(statsJson) as Map<String, dynamic>;
+        _gameStats = decoded.map((key, value) {
+          final gameMap = Map<String, int>.from(value as Map);
+          return MapEntry(key, gameMap);
+        });
+      } catch (e) {
+        debugPrint('Error decoding stats: $e');
+        _initDefaultStats();
+      }
+    } else {
+      _initDefaultStats();
     }
     
     // Load known players
@@ -187,15 +303,100 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
         debugPrint('Error decoding known players: $e');
       }
     }
+
+    _loadBlockedPlayers(prefs);
     
     notifyListeners();
     
-    if (_mode == AppConnectivityMode.real) {
-      _initRealPlugin();
+    _initRealPlugin();
+  }
+
+  void _initDefaultStats() {
+    _gameStats = {
+      'tictactoe': {'wins_vs_bot': 0, 'losses_vs_bot': 0, 'wins_vs_player': 0, 'losses_vs_player': 0, 'play_count': 0},
+      'connect4': {'wins_vs_bot': 0, 'losses_vs_bot': 0, 'wins_vs_player': 0, 'losses_vs_player': 0, 'play_count': 0},
+      'battleship': {'wins_vs_bot': 0, 'losses_vs_bot': 0, 'wins_vs_player': 0, 'losses_vs_player': 0, 'play_count': 0},
+      'rockpaperscissors': {'wins_vs_bot': 0, 'losses_vs_bot': 0, 'wins_vs_player': 0, 'losses_vs_player': 0, 'play_count': 0},
+      'minigolf': {'wins_vs_bot': 0, 'losses_vs_bot': 0, 'wins_vs_player': 0, 'losses_vs_player': 0, 'play_count': 0},
+    };
+  }
+
+  Future<void> _saveStats() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyGameStats, jsonEncode(_gameStats));
+  }
+
+  Future<void> _savePlayTime() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyPlayTime, _totalPlayTimeSeconds);
+  }
+
+  Future<void> _saveBotDifficulty() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyBotDifficulty, _botDifficulty);
+  }
+
+  void incrementWin(String gameId) {
+    final vsBot = _connectedPeer?.isMock ?? true;
+    final statKey = vsBot ? 'wins_vs_bot' : 'wins_vs_player';
+    
+    if (_gameStats.isEmpty || !_gameStats.containsKey(gameId)) {
+      _initDefaultStats();
+    }
+    
+    _gameStats[gameId]![statKey] = (_gameStats[gameId]![statKey] ?? 0) + 1;
+    _gameStats[gameId]!['play_count'] = (_gameStats[gameId]!['play_count'] ?? 0) + 1;
+    _saveStats();
+    notifyListeners();
+  }
+
+  void incrementLoss(String gameId) {
+    final vsBot = _connectedPeer?.isMock ?? true;
+    final statKey = vsBot ? 'losses_vs_bot' : 'losses_vs_player';
+    
+    if (_gameStats.isEmpty || !_gameStats.containsKey(gameId)) {
+      _initDefaultStats();
+    }
+    
+    _gameStats[gameId]![statKey] = (_gameStats[gameId]![statKey] ?? 0) + 1;
+    _gameStats[gameId]!['play_count'] = (_gameStats[gameId]!['play_count'] ?? 0) + 1;
+    _saveStats();
+    notifyListeners();
+  }
+
+  void _loadBlockedPlayers(SharedPreferences prefs) {
+    final jsonStr = prefs.getString('two_play_blocked_players');
+    if (jsonStr != null) {
+      try {
+        final decoded = jsonDecode(jsonStr) as Map<String, dynamic>;
+        decoded.forEach((key, value) {
+          final time = DateTime.parse(value as String);
+          if (time.isAfter(DateTime.now())) {
+            _blockedPlayers[key] = time;
+          }
+        });
+      } catch (e) {
+        debugPrint('Error loading blocked players: $e');
+      }
+    }
+  }
+
+  Future<void> _saveBlockedPlayers() async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = _blockedPlayers.map((key, value) => MapEntry(key, value.toIso8601String()));
+    await prefs.setString('two_play_blocked_players', jsonEncode(data));
+  }
+
+  Future<void> setBotDifficulty(String difficulty) async {
+    if (difficulty == 'einfach' || difficulty == 'mittel' || difficulty == 'schwer') {
+      _botDifficulty = difficulty;
+      await _saveBotDifficulty();
+      notifyListeners();
     }
   }
 
   Future<void> _registerConnectedPlayer(AppPeer peer) async {
+    if (peer.isMock) return;
     final prefs = await SharedPreferences.getInstance();
     final existingIndex = _knownPlayers.indexWhere((p) => p['id'] == peer.id);
     
@@ -230,8 +431,7 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
     await prefs.setString(_keyUsername, newName);
     notifyListeners();
     
-    // If advertising in real mode, restart with the new name
-    if (_mode == AppConnectivityMode.real && _isAdvertising) {
+    if (_isAdvertising) {
       await stopAdvertising();
       await startAdvertising();
     }
@@ -245,24 +445,68 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> setConnectivityMode(AppConnectivityMode selectedMode) async {
-    // Clean up current state
-    await disconnect();
-    await stopScanning();
-    await stopAdvertising();
-
-    _mode = selectedMode;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyMode, selectedMode == AppConnectivityMode.real ? 'real' : 'simulated');
-    
-    if (_mode == AppConnectivityMode.real) {
-      await _initRealPlugin();
-    } else {
-      _closeRealPlugin();
-    }
+    // Kept for backward compatibility but always keep real P2P behavior internally
     notifyListeners();
   }
 
+  bool _isKnownPlayer(String id) {
+    return _knownPlayers.any((p) => p['id'] == id);
+  }
+
+  void _initiateHandshake() {
+    if (_connectedPeer == null || _connectedPeer!.isMock) return;
+    
+    _isVerifying = false;
+    _verificationPin = null;
+    _pinError = false;
+    _pinErrorMessage = null;
+    
+    sendPayload({
+      'type': 'handshake',
+      'username': _myUsername,
+      'isKnown': _isKnownPlayer(_connectedPeer!.id),
+    });
+  }
+
+  void verifyCode(int pin) {
+    if (isHost) {
+      if (pin == _verificationPin) {
+        _isVerifying = false;
+        _registerConnectedPlayer(_connectedPeer!);
+        sendPayload({'type': 'pin_success'});
+        notifyListeners();
+      } else {
+        _pinError = true;
+        _pinErrorMessage = 'Falscher PIN. Bitte erneut versuchen.';
+        notifyListeners();
+      }
+    } else {
+      sendPayload({
+        'type': 'pin_submit',
+        'pin': pin,
+      });
+    }
+  }
+
+  void clearPinError() {
+    _pinError = false;
+    _pinErrorMessage = null;
+    notifyListeners();
+  }
+
+  void blockPlayer(String id) {
+    _blockedPlayers[id] = DateTime.now().add(const Duration(minutes: 10));
+    _saveBlockedPlayers();
+    notifyListeners();
+    
+    if (_connectedPeer != null && _connectedPeer!.id == id) {
+      disconnect();
+    }
+  }
+
   // --- Core Actions ---
+
+  Timer? _advertiserBotTimer;
 
   Future<void> startAdvertising() async {
     if (_isAdvertising) return;
@@ -270,29 +514,49 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
     _isHost = true;
     notifyListeners();
 
-    if (_mode == AppConnectivityMode.real) {
-      try {
-        await _nearbyService?.startAdvertisingPeer();
-      } catch (e) {
-        debugPrint('Error starting advertising: $e');
-      }
-    } else {
-      // Simulator: simulate incoming join requests occasionally
-      _startSimulatedAdvertising();
+    try {
+      await _nearbyService?.startAdvertisingPeer();
+    } catch (e) {
+      debugPrint('Error starting advertising: $e');
     }
+
+    _advertiserBotTimer?.cancel();
+    _advertiserBotTimer = Timer(const Duration(seconds: 5), () {
+      if (_isAdvertising && !isConnected) {
+        final mockName = _mockNames[_random.nextInt(_mockNames.length)];
+        final mockId = 'mock_${mockName.toLowerCase()}_${_random.nextInt(1000)}';
+        
+        final mockPeer = AppPeer(
+          id: mockId,
+          name: mockName,
+          state: PeerState.connecting,
+          isMock: true,
+        );
+
+        _discoveredPeers = [mockPeer];
+        notifyListeners();
+
+        _messageController.add({
+          'type': 'simulated_invite_request',
+          'peer': {
+            'id': mockId,
+            'name': mockName,
+          }
+        });
+      }
+    });
   }
 
   Future<void> stopAdvertising() async {
     if (!_isAdvertising) return;
     _isAdvertising = false;
+    _advertiserBotTimer?.cancel();
     notifyListeners();
 
-    if (_mode == AppConnectivityMode.real) {
-      try {
-        await _nearbyService?.stopAdvertisingPeer();
-      } catch (e) {
-        debugPrint('Error stopping advertising: $e');
-      }
+    try {
+      await _nearbyService?.stopAdvertisingPeer();
+    } catch (e) {
+      debugPrint('Error stopping advertising: $e');
     }
   }
 
@@ -300,100 +564,104 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
     if (_isScanning) return;
     _isScanning = true;
     _discoveredPeers = [];
+    _showMockBots = false;
     notifyListeners();
 
-    if (_mode == AppConnectivityMode.real) {
-      try {
-        await _nearbyService?.startBrowsingForPeers();
-      } catch (e) {
-        debugPrint('Error starting scanning: $e');
+    _botTimer?.cancel();
+    _botTimer = Timer(const Duration(seconds: 4), () {
+      if (_discoveredPeers.isEmpty && _isScanning) {
+        _showMockBots = true;
+        notifyListeners();
       }
-    } else {
-      // Simulator scanning logic
-      _simulationScanTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
-        if (_discoveredPeers.length < 4) {
-          final mockName = _mockNames[_random.nextInt(_mockNames.length)];
-          final mockId = 'mock_${mockName.toLowerCase()}_${_random.nextInt(1000)}';
-          if (!_discoveredPeers.any((p) => p.name == mockName)) {
-            _discoveredPeers.add(AppPeer(
-              id: mockId,
-              name: mockName,
-              state: PeerState.notConnected,
-              isMock: true,
-            ));
-            notifyListeners();
-          }
-        } else {
-          timer.cancel();
-        }
-      });
+    });
+
+    try {
+      await _nearbyService?.startBrowsingForPeers();
+    } catch (e) {
+      debugPrint('Error starting scanning: $e');
     }
   }
 
   Future<void> stopScanning() async {
     if (!_isScanning) return;
     _isScanning = false;
+    _botTimer?.cancel();
     _simulationScanTimer?.cancel();
     notifyListeners();
 
-    if (_mode == AppConnectivityMode.real) {
-      try {
-        await _nearbyService?.stopBrowsingForPeers();
-      } catch (e) {
-        debugPrint('Error stopping scanning: $e');
-      }
+    try {
+      await _nearbyService?.stopBrowsingForPeers();
+    } catch (e) {
+      debugPrint('Error stopping scanning: $e');
     }
   }
 
   Future<void> invitePeer(AppPeer peer) async {
-    _isHost = false; // We joined/invited their lobby, so remote is host
+    _isHost = false;
     _updatePeerState(peer.id, PeerState.connecting);
 
-    if (_mode == AppConnectivityMode.real) {
+    if (peer.isMock) {
+      if (peer.id == 'mock_bot_einfach') {
+        _botDifficulty = 'einfach';
+      } else if (peer.id == 'mock_bot_mittel') {
+        _botDifficulty = 'mittel';
+      } else if (peer.id == 'mock_bot_schwer') {
+        _botDifficulty = 'schwer';
+      }
+      _saveBotDifficulty();
+
+      Timer(const Duration(milliseconds: 1000), () {
+        _connectedPeer = peer.copyWith(state: PeerState.connected);
+        _updatePeerState(peer.id, PeerState.connected);
+        stopScanning();
+      });
+    } else {
       try {
         await _nearbyService?.invitePeer(deviceID: peer.id, deviceName: peer.name);
       } catch (e) {
         debugPrint('Error inviting peer: $e');
         _updatePeerState(peer.id, PeerState.notConnected);
       }
-    } else {
-      // Simulated connection process
-      Timer(const Duration(milliseconds: 1500), () {
-        _connectedPeer = peer.copyWith(state: PeerState.connected);
-        _updatePeerState(peer.id, PeerState.connected);
-        _registerConnectedPlayer(peer);
-        stopScanning();
-      });
     }
   }
 
   Future<void> acceptInvite(AppPeer peer) async {
-    _isHost = true; // We created the lobby (advertised), so we are host
+    _isHost = true;
     _updatePeerState(peer.id, PeerState.connecting);
 
-    if (_mode == AppConnectivityMode.real) {
+    if (peer.isMock) {
+      Timer(const Duration(milliseconds: 1000), () {
+        _connectedPeer = peer.copyWith(state: PeerState.connected);
+        _updatePeerState(peer.id, PeerState.connected);
+        stopAdvertising();
+      });
+    } else {
       try {
-        // Accept invitation is handled automatically or by inviting back in flutter_nearby_connections
         await _nearbyService?.invitePeer(deviceID: peer.id, deviceName: peer.name);
       } catch (e) {
         debugPrint('Error accepting invite: $e');
         _updatePeerState(peer.id, PeerState.notConnected);
       }
-    } else {
-      Timer(const Duration(milliseconds: 1000), () {
-        _connectedPeer = peer.copyWith(state: PeerState.connected);
-        _updatePeerState(peer.id, PeerState.connected);
-        _registerConnectedPlayer(peer);
-        stopAdvertising();
-      });
+    }
+  }
+
+  void _updatePlayTime() {
+    if (_gameStartTime != null) {
+      final diff = DateTime.now().difference(_gameStartTime!).inSeconds;
+      _totalPlayTimeSeconds += diff;
+      _savePlayTime();
+      _gameStartTime = null;
     }
   }
 
   Future<void> disconnect() async {
+    _updatePlayTime();
+    
     if (_connectedPeer == null) return;
     final peerId = _connectedPeer!.id;
+    final isMock = _connectedPeer!.isMock;
 
-    if (_mode == AppConnectivityMode.real) {
+    if (!isMock) {
       try {
         await _nearbyService?.disconnectPeer(deviceID: peerId);
       } catch (e) {
@@ -406,6 +674,10 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
     _suggestedGameId = null;
     _chatMessages.clear();
     _unreadChatCount = 0;
+    _isVerifying = false;
+    _verificationPin = null;
+    _pinError = false;
+    _pinErrorMessage = null;
     _updatePeerState(peerId, PeerState.notConnected);
     notifyListeners();
   }
@@ -425,7 +697,8 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
 
   void selectGame(String gameId) {
     _activeGameId = gameId;
-    _suggestedGameId = null; // Clear suggestion
+    _suggestedGameId = null;
+    _gameStartTime = DateTime.now();
     notifyListeners();
     sendPayload({
       'type': 'game_select',
@@ -443,8 +716,9 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void exitGame() {
+    _updatePlayTime();
     _activeGameId = null;
-    _suggestedGameId = null; // Clear suggestion
+    _suggestedGameId = null;
     notifyListeners();
     sendPayload({
       'type': 'game_exit',
@@ -457,10 +731,9 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
     if (!isConnected) return;
     final jsonStr = jsonEncode(payload);
 
-    if (_mode == AppConnectivityMode.real) {
+    if (_connectedPeer != null && !_connectedPeer!.isMock) {
       _nearbyService?.sendMessage(connectedPeer!.id, jsonStr);
     } else {
-      // Simulator: trigger AI response if it's a move payload
       _handleSimulatedMessage(payload);
     }
   }
@@ -481,38 +754,42 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
       );
 
       _subscriptionState = _nearbyService!.stateChangedSubscription(callback: (devicesList) {
-        _discoveredPeers = devicesList.map((device) {
+        final realDevices = devicesList.map((device) {
           PeerState state = PeerState.notConnected;
           if (device.state == SessionState.connected) {
             state = PeerState.connected;
           } else if (device.state == SessionState.connecting) {
             state = PeerState.connecting;
           }
-          
-          final appPeer = AppPeer(id: device.deviceId, name: device.deviceName, state: state);
-          if (state == PeerState.connected) {
-            _connectedPeer = appPeer;
-            _registerConnectedPlayer(appPeer);
-            // The advertiser/browser logic maps who is host
-            // If we were scanning, we invited, hence we are guest
-            if (_isScanning) _isHost = false;
-            // If we were advertising, they invited us, hence we are host
-            if (_isAdvertising) _isHost = true;
-          }
-          return appPeer;
+          return AppPeer(id: device.deviceId, name: device.deviceName, state: state, isMock: false);
         }).toList();
 
-        // Check if previously connected peer got disconnected
-        if (_connectedPeer != null && !_discoveredPeers.any((p) => p.id == _connectedPeer!.id && p.state == PeerState.connected)) {
-          _connectedPeer = null;
-          _activeGameId = null;
+        _discoveredPeers = realDevices;
+        
+        if (realDevices.isNotEmpty) {
+          _showMockBots = false;
         }
 
+        final connectedIndex = realDevices.indexWhere((p) => p.state == PeerState.connected);
+        if (connectedIndex != -1) {
+          final oldConnected = _connectedPeer;
+          _connectedPeer = realDevices[connectedIndex];
+          if (oldConnected == null || oldConnected.state != PeerState.connected) {
+            _isHost = _isAdvertising;
+            _registerConnectedPlayer(_connectedPeer!);
+            _initiateHandshake();
+          }
+        } else {
+          if (_connectedPeer != null && !_connectedPeer!.isMock) {
+            _connectedPeer = null;
+            _activeGameId = null;
+            _updatePlayTime();
+          }
+        }
         notifyListeners();
       });
 
       _subscriptionData = _nearbyService!.dataReceivedSubscription(callback: (data) {
-        // Data format on iOS: { 'id': deviceID, 'message': text }
         try {
           final rawMessage = data['message'] as String;
           final decoded = jsonDecode(rawMessage) as Map<String, dynamic>;
@@ -539,11 +816,13 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
     final type = payload['type'] as String?;
     if (type == 'game_select') {
       _activeGameId = payload['gameId'] as String?;
-      _suggestedGameId = null; // Clear suggestion
+      _suggestedGameId = null;
+      _gameStartTime = DateTime.now();
       notifyListeners();
     } else if (type == 'game_exit') {
+      _updatePlayTime();
       _activeGameId = null;
-      _suggestedGameId = null; // Clear suggestion
+      _suggestedGameId = null;
       notifyListeners();
     } else if (type == 'game_suggest') {
       _suggestedGameId = payload['gameId'] as String?;
@@ -559,7 +838,52 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
       ));
       _unreadChatCount++;
       notifyListeners();
+    } else if (type == 'handshake') {
+      final peerName = payload['username'] as String? ?? 'Gegner';
+      final isPeerKnown = payload['isKnown'] as bool? ?? false;
+      
+      if (_connectedPeer != null) {
+        _connectedPeer = _connectedPeer!.copyWith(name: peerName);
+      }
+      
+      final weKnowThem = _isKnownPlayer(_connectedPeer!.id);
+      if (!weKnowThem || !isPeerKnown) {
+        _isVerifying = true;
+        if (_isHost) {
+          _verificationPin = _random.nextInt(9000) + 1000;
+          notifyListeners();
+        } else {
+          notifyListeners();
+        }
+      } else {
+        _isVerifying = false;
+        _registerConnectedPlayer(_connectedPeer!);
+        notifyListeners();
+      }
+    } else if (type == 'pin_submit') {
+      final pin = payload['pin'] as int?;
+      if (pin == _verificationPin) {
+        _isVerifying = false;
+        _registerConnectedPlayer(_connectedPeer!);
+        sendPayload({'type': 'pin_success'});
+        notifyListeners();
+      } else {
+        sendPayload({
+          'type': 'pin_fail',
+          'message': 'Falscher PIN. Bitte erneut versuchen.',
+        });
+      }
+    } else if (type == 'pin_success') {
+      _isVerifying = false;
+      _registerConnectedPlayer(_connectedPeer!);
+      notifyListeners();
+    } else if (type == 'pin_fail') {
+      _pinError = true;
+      _pinErrorMessage = payload['message'] as String? ?? 'Falscher PIN.';
+      notifyListeners();
     }
+    
+    _messageController.add(payload);
     
     // Pass downstream to active game screens
     _messageController.add(payload);
@@ -661,31 +985,45 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
     final gameId = userMove['gameId'] as String?;
     final userMoveData = userMove['data'] as Map<String, dynamic>?;
 
+    final roll = _random.nextDouble();
+    final threshold = _botDifficulty == 'einfach' ? 0.60 : (_botDifficulty == 'mittel' ? 0.30 : 0.0);
+
     if (gameId == 'tictactoe' && userMoveData != null) {
       final board = List<String>.from(userMoveData['board']);
       final aiSymbol = userMoveData['playerSymbol'] == 'X' ? 'O' : 'X';
       
-      // Smart Tic-Tac-Toe Move
       int bestMove = -1;
       
-      // 1. Can AI Win?
-      bestMove = _findTicTacToeWinningMove(board, aiSymbol);
-      // 2. Can Player Win? Block it.
-      if (bestMove == -1) {
-        bestMove = _findTicTacToeWinningMove(board, userMoveData['playerSymbol']);
-      }
-      // 3. Take Center
-      if (bestMove == -1 && board[4].isEmpty) {
-        bestMove = 4;
-      }
-      // 4. Take random empty cell
-      if (bestMove == -1) {
+      if (roll < threshold) {
+        // Sub-optimal: choose random empty cell
         final emptyCells = <int>[];
         for (int i = 0; i < 9; i++) {
           if (board[i].isEmpty) emptyCells.add(i);
         }
         if (emptyCells.isNotEmpty) {
           bestMove = emptyCells[_random.nextInt(emptyCells.length)];
+        }
+      } else {
+        // Optimal Tic-Tac-Toe Move
+        // 1. Can AI Win?
+        bestMove = _findTicTacToeWinningMove(board, aiSymbol);
+        // 2. Can Player Win? Block it.
+        if (bestMove == -1) {
+          bestMove = _findTicTacToeWinningMove(board, userMoveData['playerSymbol']);
+        }
+        // 3. Take Center
+        if (bestMove == -1 && board[4].isEmpty) {
+          bestMove = 4;
+        }
+        // 4. Take random empty cell
+        if (bestMove == -1) {
+          final emptyCells = <int>[];
+          for (int i = 0; i < 9; i++) {
+            if (board[i].isEmpty) emptyCells.add(i);
+          }
+          if (emptyCells.isNotEmpty) {
+            bestMove = emptyCells[_random.nextInt(emptyCells.length)];
+          }
         }
       }
 
@@ -705,30 +1043,50 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
       final board = List<List<int>>.from(
         (userMoveData['board'] as List).map((col) => List<int>.from(col))
       );
-      // User is 1, AI is 2
       final userPlayer = 1;
       final aiPlayer = 2;
 
-      // Smart Column picker
       int bestCol = -1;
 
-      // Check if AI can win in 1 move
-      for (int c = 0; c < 7; c++) {
-        if (_canPlayColumn(board, c)) {
-          final tempBoard = _simulatePlay(board, c, aiPlayer);
-          if (_checkConnect4Win(tempBoard, aiPlayer)) {
-            bestCol = c;
-            break;
-          }
+      if (roll < threshold) {
+        // Sub-optimal: choose random column
+        final validCols = <int>[];
+        for (int c = 0; c < 7; c++) {
+          if (_canPlayColumn(board, c)) validCols.add(c);
         }
-      }
-
-      // Check if Player can win in 1 move, block them
-      if (bestCol == -1) {
+        if (validCols.isNotEmpty) {
+          bestCol = validCols[_random.nextInt(validCols.length)];
+        }
+      } else {
+        // Check if AI can win in 1 move
         for (int c = 0; c < 7; c++) {
           if (_canPlayColumn(board, c)) {
-            final tempBoard = _simulatePlay(board, c, userPlayer);
-            if (_checkConnect4Win(tempBoard, userPlayer)) {
+            final tempBoard = _simulatePlay(board, c, aiPlayer);
+            if (_checkConnect4Win(tempBoard, aiPlayer)) {
+              bestCol = c;
+              break;
+            }
+          }
+        }
+
+        // Check if Player can win in 1 move, block them
+        if (bestCol == -1) {
+          for (int c = 0; c < 7; c++) {
+            if (_canPlayColumn(board, c)) {
+              final tempBoard = _simulatePlay(board, c, userPlayer);
+              if (_checkConnect4Win(tempBoard, userPlayer)) {
+                bestCol = c;
+                break;
+              }
+            }
+          }
+        }
+
+        // Take middle columns preferred
+        if (bestCol == -1) {
+          final preferences = [3, 2, 4, 1, 5, 0, 6];
+          for (int c in preferences) {
+            if (_canPlayColumn(board, c)) {
               bestCol = c;
               break;
             }
@@ -736,19 +1094,7 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
         }
       }
 
-      // Take middle columns preferred
-      if (bestCol == -1) {
-        final preferences = [3, 2, 4, 1, 5, 0, 6];
-        for (int c in preferences) {
-          if (_canPlayColumn(board, c)) {
-            bestCol = c;
-            break;
-          }
-        }
-      }
-
       if (bestCol != -1) {
-        // Perform move
         int rowPlayed = -1;
         for (int r = 5; r >= 0; r--) {
           if (board[bestCol][r] == 0) {
@@ -769,10 +1115,8 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
         };
       }
     } else if (gameId == 'battleship' && userMoveData != null) {
-      // Battleship flow is split into setup and game turns
       final subtype = userMoveData['subtype'] as String?;
       if (subtype == 'player_ready') {
-        // AI is immediately ready with their own randomized board
         final aiBoard = _generateRandomBattleshipBoard();
         return {
           'type': 'game_move',
@@ -783,47 +1127,47 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
           }
         };
       } else if (subtype == 'fire') {
-        // Receive fire response, then generate AI's shot
-        // AI generates shot at User Board
         final userFleet = List<List<int>>.from(
           (userMoveData['userBoard'] as List).map((row) => List<int>.from(row))
         );
         
-        // Simple Battleship AI: target hits or random shots
         int targetX = -1;
         int targetY = -1;
 
-        // Hunt mode: search user board for hits (value 2 = Hit) and fire adjacent
-        bool foundHunt = false;
-        for (int r = 0; r < 10; r++) {
-          for (int c = 0; c < 10; c++) {
-            if (userFleet[r][c] == 2) { // Hit ship
-              // Look around
-              final adjacents = [[r-1, c], [r+1, c], [r, c-1], [r, c+1]];
-              for (var adj in adjacents) {
-                int ar = adj[0];
-                int ac = adj[1];
-                if (ar >= 0 && ar < 10 && ac >= 0 && ac < 10) {
-                  if (userFleet[ar][ac] == 0 || userFleet[ar][ac] == 1) { // Untargeted empty or ship
-                    targetX = ac;
-                    targetY = ar;
-                    foundHunt = true;
-                    break;
+        bool huntAllowed = roll >= threshold;
+
+        if (huntAllowed) {
+          // Hunt mode: search user board for hits (value 2 = Hit) and fire adjacent
+          bool foundHunt = false;
+          for (int r = 0; r < 10; r++) {
+            for (int c = 0; c < 10; c++) {
+              if (userFleet[r][c] == 2) {
+                final adjacents = [[r-1, c], [r+1, c], [r, c-1], [r, c+1]];
+                for (var adj in adjacents) {
+                  int ar = adj[0];
+                  int ac = adj[1];
+                  if (ar >= 0 && ar < 10 && ac >= 0 && ac < 10) {
+                    if (userFleet[ar][ac] == 0 || userFleet[ar][ac] == 1) {
+                      targetX = ac;
+                      targetY = ar;
+                      foundHunt = true;
+                      break;
+                    }
                   }
                 }
               }
+              if (foundHunt) break;
             }
             if (foundHunt) break;
           }
-          if (foundHunt) break;
         }
 
-        // Random mode
+        // Random mode fallback
         if (targetX == -1) {
           final potentials = <Point>[];
           for (int r = 0; r < 10; r++) {
             for (int c = 0; c < 10; c++) {
-              if (userFleet[r][c] == 0 || userFleet[r][c] == 1) { // Empty or unhit ship
+              if (userFleet[r][c] == 0 || userFleet[r][c] == 1) {
                 potentials.add(Point(c, r));
               }
             }
@@ -836,7 +1180,6 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
         }
 
         if (targetX != -1) {
-          // Process shot results: userFleet[targetY][targetX] == 1 -> Hit (value 2), else Miss (value 3)
           final isHit = userFleet[targetY][targetX] == 1;
           userFleet[targetY][targetX] = isHit ? 2 : 3;
 
@@ -854,15 +1197,37 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
         }
       }
     } else if (gameId == 'rockpaperscissors' && userMoveData != null) {
-      // User locked choice. AI reveals choice.
       final choices = ['rock', 'paper', 'scissors'];
-      final aiChoice = choices[_random.nextInt(3)];
+      final userChoice = userMoveData['userChoice'] as String;
+      
+      String aiChoice;
+      if (roll < threshold) {
+        // Easy / Medium sub-optimal choice (lose with high probability, or just random)
+        if (_random.nextBool()) {
+          // Sub-optimal: intentionally lose
+          if (userChoice == 'rock') aiChoice = 'scissors';
+          else if (userChoice == 'paper') aiChoice = 'rock';
+          else aiChoice = 'paper';
+        } else {
+          aiChoice = choices[_random.nextInt(3)];
+        }
+      } else {
+        // Optimal / Hard choice: win with 75% probability, otherwise random
+        if (_random.nextDouble() < 0.75) {
+          if (userChoice == 'rock') aiChoice = 'paper';
+          else if (userChoice == 'paper') aiChoice = 'scissors';
+          else aiChoice = 'rock';
+        } else {
+          aiChoice = choices[_random.nextInt(3)];
+        }
+      }
+
       return {
         'type': 'game_move',
         'gameId': 'rockpaperscissors',
         'data': {
           'aiChoice': aiChoice,
-          'userChoice': userMoveData['userChoice'],
+          'userChoice': userChoice,
         }
       };
     }

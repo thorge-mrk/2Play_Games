@@ -23,6 +23,7 @@ class _TicTacToeScreenState extends State<TicTacToeScreen> {
   bool _isGameOver = false;
   String _winner = ''; // 'X', 'O', or 'draw'
   bool _waitingForResetAccept = false;
+  bool _statsUpdated = false;
 
   @override
   void initState() {
@@ -99,6 +100,7 @@ class _TicTacToeScreenState extends State<TicTacToeScreen> {
           _isGameOver = true;
           _winner = _board[line[0]];
         });
+        _updateStats();
         return;
       }
     }
@@ -108,6 +110,19 @@ class _TicTacToeScreenState extends State<TicTacToeScreen> {
         _isGameOver = true;
         _winner = 'draw';
       });
+      _updateStats();
+    }
+  }
+
+  void _updateStats() {
+    if (_statsUpdated) return;
+    final connService = Provider.of<ConnectivityService>(context, listen: false);
+    if (_winner == _mySymbol) {
+      connService.incrementWin('tictactoe');
+      _statsUpdated = true;
+    } else if (_winner == _opponentSymbol) {
+      connService.incrementLoss('tictactoe');
+      _statsUpdated = true;
     }
   }
 
@@ -128,15 +143,75 @@ class _TicTacToeScreenState extends State<TicTacToeScreen> {
       _isGameOver = false;
       _winner = '';
       _waitingForResetAccept = false;
+      _statsUpdated = false;
     });
   }
 
-  void _exitGame() {
-    final connService = Provider.of<ConnectivityService>(context, listen: false);
-    if (connService.isHost) {
-      connService.exitGame();
+  void _exitGame() async {
+    final shouldExit = await _showExitConfirmationDialog();
+    if (shouldExit) {
+      final connService = Provider.of<ConnectivityService>(context, listen: false);
+      connService.disconnect();
     }
-    Navigator.of(context).pop();
+  }
+
+  Future<bool> _showExitConfirmationDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: Colors.transparent,
+          contentPadding: EdgeInsets.zero,
+          content: GlassContainer(
+            padding: const EdgeInsets.all(24),
+            borderRadius: 24,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.warning_amber_rounded,
+                  size: 48,
+                  color: Colors.redAccent,
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Spiel beenden?',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Möchtest du das Spiel wirklich beenden? Dies bricht das Spiel für beide Spieler ab und trennt die Verbindung.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(false),
+                      child: const Text('Nein, weiterspielen', style: TextStyle(color: Colors.white70)),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: () => Navigator.of(ctx).pop(true),
+                      child: const Text('Ja, beenden'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    return result ?? false;
   }
 
   @override
@@ -155,8 +230,14 @@ class _TicTacToeScreenState extends State<TicTacToeScreen> {
     final isMyTurn = _currentTurn == _mySymbol;
     final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
 
-    return Scaffold(
-      body: Container(
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) async {
+        if (didPop) return;
+        _exitGame();
+      },
+      child: Scaffold(
+        body: Container(
         decoration: BoxDecoration(
           gradient: isDark
               ? const LinearGradient(
@@ -231,6 +312,38 @@ class _TicTacToeScreenState extends State<TicTacToeScreen> {
           ],
         ),
       ),
+    ));
+  }
+
+  Widget _buildBotDifficultySwitcher(ConnectivityService connService) {
+    if (connService.connectedPeer?.isMock != true) return const SizedBox();
+    
+    return Container(
+      margin: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: connService.botDifficulty,
+          dropdownColor: AppTheme.darkCard,
+          icon: const Icon(Icons.arrow_drop_down, color: Colors.white70, size: 18),
+          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+          onChanged: (val) {
+            if (val != null) {
+              connService.setBotDifficulty(val);
+            }
+          },
+          items: const [
+            DropdownMenuItem(value: 'einfach', child: Text('🤖 Einfach')),
+            DropdownMenuItem(value: 'mittel', child: Text('🤖 Mittel')),
+            DropdownMenuItem(value: 'schwer', child: Text('🤖 Schwer')),
+          ],
+        ),
+      ),
     );
   }
 
@@ -244,14 +357,19 @@ class _TicTacToeScreenState extends State<TicTacToeScreen> {
             icon: Icon(Icons.arrow_back_ios_new_rounded, color: isDark ? Colors.white70 : Colors.black87),
             onPressed: _exitGame,
           ),
-          Text(
-            'Tic-Tac-Toe',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: isDark ? Colors.white : Colors.black87,
+          Expanded(
+            child: Center(
+              child: Text(
+                'Tic-Tac-Toe',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
             ),
           ),
+          _buildBotDifficultySwitcher(connService),
           IconButton(
             icon: Stack(
               clipBehavior: Clip.none,

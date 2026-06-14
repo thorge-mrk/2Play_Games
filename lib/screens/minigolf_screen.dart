@@ -55,6 +55,9 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
   Offset _opponentBallVel = Offset.zero;
   int _opponentStrokeCount = 0;
   bool _opponentCompleted = false;
+  Offset? _opponentDragStart;
+  Offset? _opponentDragCurrent;
+  bool _statsUpdated = false;
 
   StreamSubscription? _msgSubscription;
 
@@ -92,6 +95,39 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
             _opponentCompleted = data['completed'] as bool;
             _opponentStrokeCount = data['strokes'] as int;
           });
+          if (data['completed'] == true) {
+            _checkGameWinnerAndIncrementStats();
+          }
+        } else if (subtype == 'aiming') {
+          setState(() {
+            if (data['startX'] != null && data['currentX'] != null) {
+              _opponentDragStart = Offset(data['startX'] as double, data['startY'] as double);
+              _opponentDragCurrent = Offset(data['currentX'] as double, data['currentY'] as double);
+            } else {
+              _opponentDragStart = null;
+              _opponentDragCurrent = null;
+            }
+          });
+        } else if (subtype == 'obstacles_sync') {
+          final obstaclesData = data['obstacles'] as List<dynamic>;
+          for (var obsData in obstaclesData) {
+            final id = obsData['id'] as String;
+            final offset = (obsData['offset'] as num).toDouble();
+            final angle = (obsData['angle'] as num).toDouble();
+            final dir = obsData['dir'] as int;
+
+            final obstacle = _currentLevel.movingObstacles.firstWhere(
+              (o) => o.id == id,
+              orElse: () => MovingObstacle(id: '', initialRect: Rect.zero),
+            );
+            if (obstacle.id.isNotEmpty) {
+              setState(() {
+                obstacle.currentOffset = offset;
+                obstacle.currentAngle = angle;
+                obstacle.direction = dir;
+              });
+            }
+          }
         }
       } else if (payload['type'] == 'game_reset' && payload['gameId'] == 'minigolf') {
         connService.sendPayload({
@@ -127,6 +163,9 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
       _opponentStrokeCount = 0;
       _opponentCompleted = false;
       _lastElapsedSeconds = 0;
+      _statsUpdated = false;
+      _opponentDragStart = null;
+      _opponentDragCurrent = null;
     });
   }
 
@@ -172,6 +211,8 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
     });
   }
 
+  int _obstacleSyncCounter = 0;
+
   void _tick(Duration elapsed) {
     final double elapsedSeconds = elapsed.inMicroseconds / 1000000.0;
     double dt = elapsedSeconds - _lastElapsedSeconds;
@@ -180,9 +221,38 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
 
     if (_levelCompleted) return;
 
+    final connService = Provider.of<ConnectivityService>(context, listen: false);
+
     // Update moving obstacles
-    for (var obstacle in _currentLevel.movingObstacles) {
-      obstacle.update(dt);
+    if (!connService.isConnected || connService.isHost) {
+      for (var obstacle in _currentLevel.movingObstacles) {
+        obstacle.update(dt);
+      }
+
+      // Sync moving obstacle coordinates from Host to Guest
+      if (connService.isConnected && connService.isHost) {
+        _obstacleSyncCounter++;
+        if (_obstacleSyncCounter >= 3) {
+          _obstacleSyncCounter = 0;
+          final List<Map<String, dynamic>> obstacleStates = _currentLevel.movingObstacles.map((obs) {
+            return {
+              'id': obs.id,
+              'offset': obs.currentOffset,
+              'angle': obs.currentAngle,
+              'dir': obs.direction,
+            };
+          }).toList();
+
+          connService.sendPayload({
+            'type': 'game_move',
+            'gameId': 'minigolf',
+            'data': {
+              'subtype': 'obstacles_sync',
+              'obstacles': obstacleStates,
+            }
+          });
+        }
+      }
     }
 
     _updateBallPhysics(dt);
@@ -190,7 +260,6 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
     
     // Periodically sync our state to peer when ball is moving
     if (_ballVel.distance > 0.1) {
-      final connService = Provider.of<ConnectivityService>(context, listen: false);
       if (connService.isConnected) {
         connService.sendPayload({
           'type': 'game_move',
@@ -307,10 +376,21 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
     setState(() {
       _opponentBallPos = nextPos;
     });
+
+    // Check hole capture for opponent
+    final distToHole = (_opponentBallPos - _currentLevel.holePos).distance;
+    if (distToHole < _holeRadius && _opponentBallVel.distance < 3.5) {
+      setState(() {
+        _opponentBallVel = Offset.zero;
+        _opponentBallPos = _currentLevel.holePos;
+        _opponentCompleted = true;
+      });
+      _checkGameWinnerAndIncrementStats();
+    }
   }
 
   Offset _handleWallCollision(Rect wall, Offset nextPos, bool isMyBall) {
-    // Standard AABB-Circle collision resolution
+    // Standard AABB-Circle collision resolution with stuck detection (dist == 0)
     double cx = nextPos.dx.clamp(wall.left, wall.right);
     double cy = nextPos.dy.clamp(wall.top, wall.bottom);
 
@@ -318,20 +398,46 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
     double dy = nextPos.dy - cy;
     double dist = math.sqrt(dx * dx + dy * dy);
 
-    if (dist < _ballRadius && dist > 0) {
-      // Collision normal
-      double nx = dx / dist;
-      double ny = dy / dist;
+    if (dist < _ballRadius) {
+      double nx = 0;
+      double ny = 0;
+      double pushDist = 0;
+
+      if (dist > 0.001) {
+        nx = dx / dist;
+        ny = dy / dist;
+        pushDist = _ballRadius - dist;
+      } else {
+        // If dist is exactly 0, push out to the closest side of the wall box
+        double distToLeft = (nextPos.dx - wall.left).abs();
+        double distToRight = (nextPos.dx - wall.right).abs();
+        double distToTop = (nextPos.dy - wall.top).abs();
+        double distToBottom = (nextPos.dy - wall.bottom).abs();
+
+        double minDist = [distToLeft, distToRight, distToTop, distToBottom].reduce(math.min);
+
+        if (minDist == distToLeft) {
+          nx = -1.0;
+          pushDist = _ballRadius + distToLeft;
+        } else if (minDist == distToRight) {
+          nx = 1.0;
+          pushDist = _ballRadius + distToRight;
+        } else if (minDist == distToTop) {
+          ny = -1.0;
+          pushDist = _ballRadius + distToTop;
+        } else {
+          ny = 1.0;
+          pushDist = _ballRadius + distToBottom;
+        }
+      }
 
       // Push ball out of wall
-      Offset resolvedPos = Offset(cx + nx * _ballRadius, cy + ny * _ballRadius);
+      Offset resolvedPos = Offset(nextPos.dx + nx * pushDist, nextPos.dy + ny * pushDist);
 
       // Bounce velocity
       if (isMyBall) {
-        // Dot product of velocity and normal
         double velAlongNormal = _ballVel.dx * nx + _ballVel.dy * ny;
         if (velAlongNormal < 0) {
-          // Flip component along normal (with restitution/bounce factor 0.8)
           _ballVel = Offset(
             _ballVel.dx - 1.8 * velAlongNormal * nx,
             _ballVel.dy - 1.8 * velAlongNormal * ny,
@@ -370,7 +476,9 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
 
       if (distance < _ballRadius) {
         // Push out of segment
-        final normal = (nextPos - dPos) / (distance > 0 ? distance : 1.0);
+        final normal = distance > 0.001 
+            ? (nextPos - dPos) / distance 
+            : Offset(-math.sin(angle), math.cos(angle)); // perpendicular to blade
         final resolvedPos = dPos + normal * _ballRadius;
 
         // Bounce velocity + add some blade rotational kick
@@ -426,6 +534,8 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
       _levelCompleted = true;
     });
 
+    _checkGameWinnerAndIncrementStats();
+
     final connService = Provider.of<ConnectivityService>(context, listen: false);
     if (connService.isConnected) {
       connService.sendPayload({
@@ -467,8 +577,8 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
         }
       });
       
-      // Auto reply simulation if in Simulated Mode
-      if (connService.mode == AppConnectivityMode.simulated) {
+      // Auto reply if playing against a Bot
+      if (connService.connectedPeer?.isMock == true) {
         _triggerSimulatedOpponentStroke();
       }
     }
@@ -487,8 +597,15 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
       double angle = math.atan2(vector.dy, vector.dx);
       double dist = vector.distance;
       
-      // Add slight offset for difficulty
-      final offsetAngle = (math.Random().nextDouble() - 0.5) * 0.35;
+      // Scale aiming inaccuracy error by difficulty setting
+      double errorScale = 0.25; // default medium
+      if (connService.botDifficulty == 'einfach') {
+        errorScale = 0.55;
+      } else if (connService.botDifficulty == 'schwer') {
+        errorScale = 0.0;
+      }
+      
+      final offsetAngle = (math.Random().nextDouble() - 0.5) * errorScale;
       angle += offsetAngle;
 
       double power = (dist * 0.45).clamp(20.0, 90.0);
@@ -517,12 +634,150 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
     });
   }
 
-  void _exitGame() {
+  void _syncAimingStartOrUpdate() {
     final connService = Provider.of<ConnectivityService>(context, listen: false);
-    if (connService.isHost) {
-      connService.exitGame();
+    if (connService.isConnected) {
+      connService.sendPayload({
+        'type': 'game_move',
+        'gameId': 'minigolf',
+        'data': {
+          'subtype': 'aiming',
+          'startX': _dragStart?.dx,
+          'startY': _dragStart?.dy,
+          'currentX': _dragCurrent?.dx,
+          'currentY': _dragCurrent?.dy,
+        }
+      });
     }
-    Navigator.of(context).pop();
+  }
+
+  void _syncAimingEnd() {
+    final connService = Provider.of<ConnectivityService>(context, listen: false);
+    if (connService.isConnected) {
+      connService.sendPayload({
+        'type': 'game_move',
+        'gameId': 'minigolf',
+        'data': {
+          'subtype': 'aiming',
+          'startX': null,
+          'startY': null,
+          'currentX': null,
+          'currentY': null,
+        }
+      });
+    }
+  }
+
+  void _checkGameWinnerAndIncrementStats() {
+    if (_statsUpdated) return;
+    if (!_levelCompleted || !_opponentCompleted) return;
+
+    final connService = Provider.of<ConnectivityService>(context, listen: false);
+    if (_strokeCount < _opponentStrokeCount) {
+      connService.incrementWin('minigolf');
+      _statsUpdated = true;
+    } else if (_strokeCount > _opponentStrokeCount) {
+      connService.incrementLoss('minigolf');
+      _statsUpdated = true;
+    }
+  }
+
+  void _exitGame() async {
+    final shouldExit = await _showExitConfirmationDialog();
+    if (shouldExit) {
+      final connService = Provider.of<ConnectivityService>(context, listen: false);
+      connService.disconnect();
+    }
+  }
+
+  Future<bool> _showExitConfirmationDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: Colors.transparent,
+          contentPadding: EdgeInsets.zero,
+          content: GlassContainer(
+            padding: const EdgeInsets.all(24),
+            borderRadius: 24,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.warning_amber_rounded,
+                  size: 48,
+                  color: Colors.redAccent,
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Spiel beenden?',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Möchtest du das Spiel wirklich beenden? Dies bricht das Spiel für beide Spieler ab und trennt die Verbindung.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(false),
+                      child: const Text('Nein, weiterspielen', style: TextStyle(color: Colors.white70)),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: () => Navigator.of(ctx).pop(true),
+                      child: const Text('Ja, beenden'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    return result ?? false;
+  }
+
+  Widget _buildBotDifficultySwitcher(ConnectivityService connService) {
+    if (connService.connectedPeer?.isMock != true) return const SizedBox();
+    
+    return Container(
+      margin: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: connService.botDifficulty,
+          dropdownColor: AppTheme.darkCard,
+          icon: const Icon(Icons.arrow_drop_down, color: Colors.white70, size: 18),
+          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+          onChanged: (val) {
+            if (val != null) {
+              connService.setBotDifficulty(val);
+            }
+          },
+          items: const [
+            DropdownMenuItem(value: 'einfach', child: Text('🤖 Einfach')),
+            DropdownMenuItem(value: 'mittel', child: Text('🤖 Mittel')),
+            DropdownMenuItem(value: 'schwer', child: Text('🤖 Schwer')),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -540,26 +795,32 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
     final isBallStationary = _ballVel == Offset.zero;
     final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
 
-    return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: isDark
-              ? const LinearGradient(
-                  colors: [Color(0xFF0F0B1E), Color(0xFF130A29)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                )
-              : const LinearGradient(
-                  colors: [Color(0xFFF4F6FB), Color(0xFFE9EEF6)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-        ),
-        child: SafeArea(
-          child: Stack(
-            children: [
-              isLandscape
-                  ? Row(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        _exitGame();
+      },
+      child: Scaffold(
+        body: Container(
+          decoration: BoxDecoration(
+            gradient: isDark
+                ? const LinearGradient(
+                    colors: [Color(0xFF0F0B1E), Color(0xFF130A29)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  )
+                : const LinearGradient(
+                    colors: [Color(0xFFF4F6FB), Color(0xFFE9EEF6)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+          ),
+          child: SafeArea(
+            child: Stack(
+              children: [
+                isLandscape
+                      ? Row(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         // Left Column: stats, controls, levels
@@ -596,6 +857,7 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
                                       ),
                                       Row(
                                         children: [
+                                          _buildBotDifficultySwitcher(connService),
                                           IconButton(
                                             icon: Stack(
                                               clipBehavior: Clip.none,
@@ -726,6 +988,7 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
                                                 _dragStart = _ballPos;
                                                 _dragCurrent = tapPos;
                                               });
+                                              _syncAimingStartOrUpdate();
                                             }
                                           },
                                           onPanUpdate: (details) {
@@ -739,6 +1002,7 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
                                                 details.localPosition.dy * scaleY,
                                               );
                                             });
+                                            _syncAimingStartOrUpdate();
                                           },
                                           onPanEnd: (details) {
                                             if (_dragStart == null || _dragCurrent == null) return;
@@ -753,6 +1017,7 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
                                               _dragStart = null;
                                               _dragCurrent = null;
                                             });
+                                            _syncAimingEnd();
                                           },
                                           child: Stack(
                                             children: [
@@ -766,6 +1031,8 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
                                                   opponentCompleted: _opponentCompleted,
                                                   dragStart: _dragStart,
                                                   dragCurrent: _dragCurrent,
+                                                  opponentDragStart: _opponentDragStart,
+                                                  opponentDragCurrent: _opponentDragCurrent,
                                                   maxDrag: _maxDragDist,
                                                   isDark: isDark,
                                                 ),
@@ -829,6 +1096,7 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
                               ),
                               Row(
                                 children: [
+                                  _buildBotDifficultySwitcher(connService),
                                   IconButton(
                                     icon: Stack(
                                       clipBehavior: Clip.none,
@@ -927,6 +1195,7 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
                                                 _dragStart = _ballPos;
                                                 _dragCurrent = tapPos;
                                               });
+                                              _syncAimingStartOrUpdate();
                                             }
                                           },
                                           onPanUpdate: (details) {
@@ -940,6 +1209,7 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
                                                 details.localPosition.dy * scaleY,
                                               );
                                             });
+                                            _syncAimingStartOrUpdate();
                                           },
                                           onPanEnd: (details) {
                                             if (_dragStart == null || _dragCurrent == null) return;
@@ -954,6 +1224,7 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
                                               _dragStart = null;
                                               _dragCurrent = null;
                                             });
+                                            _syncAimingEnd();
                                           },
                                           child: Stack(
                                             children: [
@@ -967,6 +1238,8 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
                                                   opponentCompleted: _opponentCompleted,
                                                   dragStart: _dragStart,
                                                   dragCurrent: _dragCurrent,
+                                                  opponentDragStart: _opponentDragStart,
+                                                  opponentDragCurrent: _opponentDragCurrent,
                                                   maxDrag: _maxDragDist,
                                                   isDark: isDark,
                                                 ),
@@ -1060,7 +1333,7 @@ class _MinigolfScreenState extends State<MinigolfScreen> with SingleTickerProvid
           ),
         ),
       ),
-    );
+    ),);
   }
 
   Widget _buildStatusBadge(String label, bool active, Color activeColor) {
@@ -1203,6 +1476,8 @@ class GolfPainter extends CustomPainter {
   // Drag vector
   final Offset? dragStart;
   final Offset? dragCurrent;
+  final Offset? opponentDragStart;
+  final Offset? opponentDragCurrent;
   final double maxDrag;
   final bool isDark;
   final double holeRadius = 13.0;
@@ -1215,6 +1490,8 @@ class GolfPainter extends CustomPainter {
     required this.opponentCompleted,
     this.dragStart,
     this.dragCurrent,
+    this.opponentDragStart,
+    this.opponentDragCurrent,
     required this.maxDrag,
     required this.isDark,
   });
@@ -1447,6 +1724,41 @@ class GolfPainter extends CustomPainter {
         }
 
         // Draw aiming arrowhead point
+        final headPaint = Paint()
+          ..color = arrowColor
+          ..style = PaintingStyle.fill;
+        canvas.drawCircle(targetEnd, (4 + ratio * 3) * scaleX, headPaint);
+      }
+    }
+
+    // 11. Draw Opponent Aim Vector Arrow (Slingshot indicator) if synced
+    if (opponentDragStart != null && opponentDragCurrent != null) {
+      final aimVector = opponentDragStart! - opponentDragCurrent!;
+      double dist = aimVector.distance;
+      if (dist > 5.0) {
+        final clampedDist = dist.clamp(0.0, maxDrag);
+        final ratio = clampedDist / maxDrag;
+        final arrowColor = const Color(0xFFFF007F).withOpacity(0.7); // neon pink for opponent
+
+        final normalAim = aimVector / dist;
+        final scaledAim = normalAim * clampedDist;
+
+        final arrowPaint = Paint()
+          ..color = arrowColor
+          ..strokeWidth = (2.0 + ratio * 4.0) * scaleX
+          ..strokeCap = StrokeCap.round
+          ..style = PaintingStyle.stroke;
+
+        final opponentBallCenter = scaleOffset(opponentBallPos);
+        final targetEnd = opponentBallCenter + Offset(scaledAim.dx * scaleX, scaledAim.dy * scaleY);
+        
+        final dashCount = 8;
+        for (int d = 0; d < dashCount; d++) {
+          final pt1 = Offset.lerp(opponentBallCenter, targetEnd, d / dashCount)!;
+          final pt2 = Offset.lerp(opponentBallCenter, targetEnd, (d + 0.5) / dashCount)!;
+          canvas.drawLine(pt1, pt2, arrowPaint);
+        }
+
         final headPaint = Paint()
           ..color = arrowColor
           ..style = PaintingStyle.fill;

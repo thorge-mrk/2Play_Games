@@ -181,10 +181,7 @@ class GlassContainer extends StatelessWidget {
                 )
               ],
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(borderRadius - 1.5),
-        child: child,
-      ),
+      child: child,
     );
   }
 }

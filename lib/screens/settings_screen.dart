@@ -208,8 +208,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                     const SizedBox(height: 28),
 
-                    // Section: Connectivity
-                    _buildSectionHeader(context, 'NETZWERK & VERBINDUNG'),
+                    // Section: Bot difficulty
+                    _buildSectionHeader(context, 'BOT-SCHWIERIGKEIT'),
                     const SizedBox(height: 12),
                     GlassContainer(
                       padding: const EdgeInsets.all(20),
@@ -217,32 +217,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.cell_tower_rounded,
-                                    color: connService.mode == AppConnectivityMode.real
-                                        ? const Color(0xFF00F2FE)
-                                        : const Color(0xFFFF007F),
-                                  ),
-                                  const SizedBox(width: 16),
-                                  Text(
-                                    'Verbindungsmodus',
-                                    style: TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.bold,
-                                      color: isDark ? Colors.white : Colors.black87,
-                                    ),
-                                  ),
-                                ],
+                              Icon(
+                                Icons.smart_toy_rounded,
+                                color: const Color(0xFF00F2FE),
+                              ),
+                              const SizedBox(width: 16),
+                              Text(
+                                'Schwierigkeitsgrad',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: isDark ? Colors.white : Colors.black87,
+                                ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 16),
-                          
-                          // Toggle Segments
                           Container(
                             width: double.infinity,
                             padding: const EdgeInsets.all(4),
@@ -252,77 +243,130 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                             child: Row(
                               children: [
-                                Expanded(
-                                  child: GestureDetector(
-                                    onTap: () => connService.setConnectivityMode(AppConnectivityMode.simulated),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(vertical: 10),
-                                      decoration: BoxDecoration(
-                                        color: connService.mode == AppConnectivityMode.simulated
-                                            ? (isDark ? const Color(0xFF1B1437) : Colors.white)
-                                            : Colors.transparent,
-                                        borderRadius: BorderRadius.circular(10),
-                                        boxShadow: connService.mode == AppConnectivityMode.simulated && !isDark
-                                            ? AppTheme.softShadow
-                                            : [],
-                                      ),
-                                      child: Center(
-                                        child: Text(
-                                          'Demo (Simuliert)',
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.bold,
-                                            color: connService.mode == AppConnectivityMode.simulated
-                                                ? (isDark ? Colors.white : Colors.black87)
-                                                : Colors.grey,
+                                for (var diff in ['einfach', 'mittel', 'schwer'])
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () => connService.setBotDifficulty(diff),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(vertical: 10),
+                                        decoration: BoxDecoration(
+                                          color: connService.botDifficulty == diff
+                                              ? (isDark ? const Color(0xFF1B1437) : Colors.white)
+                                              : Colors.transparent,
+                                          borderRadius: BorderRadius.circular(10),
+                                          boxShadow: connService.botDifficulty == diff && !isDark
+                                              ? AppTheme.softShadow
+                                              : [],
+                                        ),
+                                        child: Center(
+                                          child: Text(
+                                            diff == 'einfach' ? 'Einfach' : (diff == 'mittel' ? 'Mittel' : 'Schwer'),
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.bold,
+                                              color: connService.botDifficulty == diff
+                                                  ? (isDark ? Colors.white : Colors.black87)
+                                                  : Colors.grey,
+                                            ),
                                           ),
                                         ),
                                       ),
                                     ),
                                   ),
-                                ),
-                                Expanded(
-                                  child: GestureDetector(
-                                    onTap: () => connService.setConnectivityMode(AppConnectivityMode.real),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(vertical: 10),
-                                      decoration: BoxDecoration(
-                                        color: connService.mode == AppConnectivityMode.real
-                                            ? (isDark ? const Color(0xFF1B1437) : Colors.white)
-                                            : Colors.transparent,
-                                        borderRadius: BorderRadius.circular(10),
-                                        boxShadow: connService.mode == AppConnectivityMode.real && !isDark
-                                            ? AppTheme.softShadow
-                                            : [],
-                                      ),
-                                      child: Center(
-                                        child: Text(
-                                          'Bluetooth & Wi-Fi',
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.bold,
-                                            color: connService.mode == AppConnectivityMode.real
-                                                ? (isDark ? Colors.white : Colors.black87)
-                                                : Colors.grey,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
                               ],
                             ),
-                          ),
-                          const SizedBox(height: 14),
-                          Text(
-                            connService.mode == AppConnectivityMode.real
-                                ? 'Verwendet Bluetooth und lokales Wi-Fi, um echte Spieler in deiner Umgebung zu finden. Benötigt zwei physische Geräte.'
-                                : 'Simuliert andere Spieler und lässt dich mit einer lokalen KI üben. Perfekt zum Ausprobieren ohne zweites Gerät!',
-                            style: const TextStyle(fontSize: 11, color: Colors.grey, height: 1.4),
                           ),
                         ],
                       ),
                     ).animate().fadeIn(delay: 200.ms, duration: 400.ms),
+
+                    const SizedBox(height: 28),
+
+                    // Section: Statistics
+                    _buildSectionHeader(context, 'STATISTIKEN'),
+                    const SizedBox(height: 12),
+                    GlassContainer(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.analytics_rounded,
+                                color: const Color(0xFFFF007F),
+                              ),
+                              const SizedBox(width: 16),
+                              Text(
+                                'Deine Spielzeit & Erfolge',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: isDark ? Colors.white : Colors.black87,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 20),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              _buildStatItem(
+                                context,
+                                'Online-Zeit',
+                                '${(connService.totalPlayTimeSeconds / 3600).toStringAsFixed(1)} Std',
+                                Icons.timer_rounded,
+                              ),
+                              _buildStatItem(
+                                context,
+                                'Lieblingsspiel',
+                                connService.favoriteGame,
+                                Icons.favorite_rounded,
+                              ),
+                            ],
+                          ),
+                          const Divider(height: 32, thickness: 1),
+                          Text(
+                            'Spiel-Statistiken:',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white70 : Colors.black54,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          for (var entry in connService.gameStats.entries)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    entry.key == 'tictactoe'
+                                        ? 'Tic-Tac-Toe'
+                                        : (entry.key == 'connect4'
+                                            ? 'Vier Gewinnt'
+                                            : (entry.key == 'battleship'
+                                                ? 'Schiffe Versenken'
+                                                : (entry.key == 'rockpaperscissors'
+                                                    ? 'Schere, Stein, Papier'
+                                                    : 'Minigolf'))),
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                  Text(
+                                    'Siege: ${entry.value['wins_vs_bot']! + entry.value['wins_vs_player']!} | Niederlagen: ${entry.value['losses_vs_bot']! + entry.value['losses_vs_player']!}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: isDark ? Colors.white54 : Colors.black54,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ).animate().fadeIn(delay: 300.ms, duration: 400.ms),
+                    const SizedBox(height: 40),
                   ],
                 ),
               ),
@@ -343,6 +387,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
         letterSpacing: 2,
         color: isDark ? Colors.white60 : Colors.grey[700],
       ),
+    );
+  }
+
+  Widget _buildStatItem(BuildContext context, String label, String value, IconData icon) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 16, color: Colors.grey),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+        ),
+      ],
     );
   }
 }

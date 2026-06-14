@@ -17,6 +17,7 @@ class LobbyScreen extends StatefulWidget {
 class _LobbyScreenState extends State<LobbyScreen> {
   StreamSubscription? _msgSubscription;
   bool _hasNavigated = false;
+  String _enteredPin = '';
 
   @override
   void initState() {
@@ -88,7 +89,6 @@ class _LobbyScreenState extends State<LobbyScreen> {
                     TextButton(
                       onPressed: () {
                         Navigator.of(ctx).pop();
-                        // Reject invite in simulated is just doing nothing
                       },
                       child: Text(
                         'Ablehnen',
@@ -122,6 +122,160 @@ class _LobbyScreenState extends State<LobbyScreen> {
     );
   }
 
+  void _showStatsDialog(ConnectivityService connService) {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: Colors.transparent,
+          contentPadding: EdgeInsets.zero,
+          content: GlassContainer(
+            padding: const EdgeInsets.all(24),
+            borderRadius: 24,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Statistiken',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 22),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.close_rounded, color: isDark ? Colors.white70 : Colors.black87),
+                      onPressed: () => Navigator.of(ctx).pop(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Online-Zeit', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${(connService.totalPlayTimeSeconds / 3600).toStringAsFixed(1)} Std',
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Lieblingsspiel', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        const SizedBox(height: 4),
+                        Text(
+                          connService.favoriteGame,
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const Divider(height: 32, thickness: 1),
+                const Text(
+                  'Spiel-Statistiken:',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                for (var entry in connService.gameStats.entries)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          entry.key == 'tictactoe'
+                              ? 'Tic-Tac-Toe'
+                              : (entry.key == 'connect4'
+                                  ? 'Vier Gewinnt'
+                                  : (entry.key == 'battleship'
+                                      ? 'Schiffe Versenken'
+                                      : (entry.key == 'rockpaperscissors'
+                                          ? 'Schere, Stein, Papier'
+                                          : 'Minigolf'))),
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                        Text(
+                          'Siege: ${entry.value['wins_vs_bot']! + entry.value['wins_vs_player']!} | Niederlagen: ${entry.value['losses_vs_bot']! + entry.value['losses_vs_player']!}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark ? Colors.white54 : Colors.black54,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showPeerOptions(ConnectivityService service, AppPeer peer) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return GlassContainer(
+          borderRadius: 24,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                peer.name,
+                style: TextStyle(
+                  fontSize: 18, 
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : AppTheme.darkBg,
+                ),
+              ),
+              const SizedBox(height: 20),
+              ListTile(
+                leading: const Icon(Icons.play_arrow_rounded, color: Color(0xFF00F2FE)),
+                title: Text('Spielen', style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : AppTheme.darkBg)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  if (service.isScanning) {
+                    service.invitePeer(peer);
+                  } else {
+                    service.acceptInvite(peer);
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.block_rounded, color: Color(0xFFFF007F)),
+                title: Text('Blockieren (10 Min)', style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : AppTheme.darkBg)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  service.blockPlayer(peer.id);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('${peer.name} wurde für 10 Minuten blockiert.')),
+                  );
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.close_rounded, color: isDark ? Colors.white70 : Colors.black54),
+                title: Text('Abbrechen', style: TextStyle(color: isDark ? Colors.white : AppTheme.darkBg)),
+                onTap: () => Navigator.of(ctx).pop(),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildKnownPlayersSection(ConnectivityService connService, bool isDark) {
     if (connService.knownPlayers.isEmpty) return const SizedBox();
     
@@ -148,24 +302,16 @@ class _LobbyScreenState extends State<LobbyScreen> {
             itemBuilder: (context, index) {
               final player = connService.knownPlayers[index];
               final name = player['name'] ?? 'Spieler';
+              final peerId = player['id'] ?? '';
               
-              // Check if they are currently online (discovered)
               final onlinePeer = connService.discoveredPeers.firstWhere(
-                (p) => p.name == name,
+                (p) => p.id == peerId || p.name == name,
                 orElse: () => AppPeer(id: '', name: '', state: PeerState.notConnected),
               );
               final isOnline = onlinePeer.id.isNotEmpty;
 
               return GestureDetector(
-                onTap: isOnline ? () {
-                  if (connService.isScanning) {
-                    connService.invitePeer(onlinePeer);
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Aktiviere "Lobby suchen", um $name einzuladen.')),
-                    );
-                  }
-                } : null,
+                onTap: isOnline ? () => _showPeerOptions(connService, onlinePeer) : null,
                 child: Container(
                   width: 130,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -174,7 +320,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
                       color: isOnline 
-                          ? const Color(0xFF00F2FE) 
+                          ? const Color(0xFF39FF14) 
                           : (isDark ? const Color(0xFF1F2937) : const Color(0xFFE5E7EB)),
                       width: 1.5,
                     ),
@@ -183,11 +329,11 @@ class _LobbyScreenState extends State<LobbyScreen> {
                     children: [
                       CircleAvatar(
                         radius: 14,
-                        backgroundColor: isOnline ? const Color(0xFF00F2FE).withOpacity(0.2) : Colors.grey.withOpacity(0.2),
+                        backgroundColor: isOnline ? const Color(0xFF39FF14).withOpacity(0.2) : Colors.grey.withOpacity(0.2),
                         child: Icon(
                           Icons.person_rounded,
                           size: 14,
-                          color: isOnline ? const Color(0xFF00F2FE) : Colors.grey,
+                          color: isOnline ? const Color(0xFF39FF14) : Colors.grey,
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -232,8 +378,11 @@ class _LobbyScreenState extends State<LobbyScreen> {
     final connService = Provider.of<ConnectivityService>(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // Auto navigate to game selection screen when connected
-    if (connService.isConnected && !_hasNavigated) {
+    if (!connService.isVerifying && _enteredPin.isNotEmpty) {
+      _enteredPin = '';
+    }
+
+    if (connService.isConnected && !_hasNavigated && !connService.isVerifying) {
       _hasNavigated = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         Navigator.of(context).push(
@@ -247,105 +396,102 @@ class _LobbyScreenState extends State<LobbyScreen> {
     final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
 
     return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: isDark
-              ? const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFF0F0B1E), Color(0xFF160E2C), Color(0xFF0F0B1E)],
-                )
-              : const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFFF0F4FA), Color(0xFFE2E9F3), Color(0xFFF7F8FC)],
-                ),
-        ),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20.0),
-            child: isLandscape
-                ? Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // LEFT COLUMN: Header, badges, title, and known players
-                      Expanded(
-                        flex: 4,
-                        child: SingleChildScrollView(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const SizedBox(height: 12),
-                              // Top Header Row
-                              _buildHeader(connService, isDark),
-                              const SizedBox(height: 16),
-                              // Mode Indicator Badge
-                              _buildModeBadge(connService, isDark),
-                              const SizedBox(height: 16),
-                              // Title
-                              Text(
-                                'Spiel-Lobby',
-                                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                      fontSize: 28,
-                                      fontWeight: FontWeight.w900,
-                                    ),
+      body: Stack(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              gradient: isDark
+                  ? const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFF0F0B1E), Color(0xFF160E2C), Color(0xFF0F0B1E)],
+                    )
+                  : const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFFF0F4FA), Color(0xFFE2E9F3), Color(0xFFF7F8FC)],
+                    ),
+            ),
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                child: isLandscape
+                    ? Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            flex: 4,
+                            child: SingleChildScrollView(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const SizedBox(height: 12),
+                                  _buildHeader(connService, isDark),
+                                  const SizedBox(height: 24),
+                                  Text(
+                                    'Spiel-Lobby',
+                                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                          fontSize: 28,
+                                          fontWeight: FontWeight.w900,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 20),
+                                  _buildKnownPlayersSection(connService, isDark),
+                                  const SizedBox(height: 12),
+                                ],
                               ),
-                              const SizedBox(height: 20),
-                              // Known Players Section
-                              _buildKnownPlayersSection(connService, isDark),
-                              const SizedBox(height: 12),
-                            ],
+                            ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(width: 24),
-                      // RIGHT COLUMN: Lobby action choices and Nearby devices list
-                      Expanded(
-                        flex: 5,
-                        child: Column(
-                          children: [
-                            const SizedBox(height: 12),
-                            _buildActionChoices(connService, isDark),
-                            const SizedBox(height: 16),
-                            _buildDevicesHeader(connService, isDark),
-                            const SizedBox(height: 8),
-                            Expanded(
-                              child: _buildDevicesList(connService, isDark),
+                          const SizedBox(width: 24),
+                          Expanded(
+                            flex: 5,
+                            child: Column(
+                              children: [
+                                const SizedBox(height: 12),
+                                _buildActionChoices(connService, isDark),
+                                const SizedBox(height: 16),
+                                _buildDevicesHeader(connService, isDark),
+                                const SizedBox(height: 8),
+                                Expanded(
+                                  child: _buildDevicesList(connService, isDark),
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 12),
+                          _buildHeader(connService, isDark).animate().fadeIn(duration: 500.ms),
+                          const SizedBox(height: 24),
+                          Text(
+                            'Spiel-Lobby',
+                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                          ).animate().fadeIn(delay: 200.ms).slideY(begin: 0.1, end: 0),
+                          const SizedBox(height: 24),
+                          _buildActionChoices(connService, isDark).animate().fadeIn(delay: 300.ms),
+                          const SizedBox(height: 24),
+                          _buildKnownPlayersSection(connService, isDark),
+                          const SizedBox(height: 24),
+                          _buildDevicesHeader(connService, isDark).animate().fadeIn(delay: 400.ms),
+                          const SizedBox(height: 16),
+                          Expanded(
+                            child: _buildDevicesList(connService, isDark),
+                          ),
+                        ],
                       ),
-                    ],
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 12),
-                      _buildHeader(connService, isDark).animate().fadeIn(duration: 500.ms),
-                      const SizedBox(height: 24),
-                      _buildModeBadge(connService, isDark).animate().fadeIn(delay: 150.ms),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Spiel-Lobby',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontSize: 32,
-                              fontWeight: FontWeight.w900,
-                            ),
-                      ).animate().fadeIn(delay: 200.ms).slideY(begin: 0.1, end: 0),
-                      const SizedBox(height: 24),
-                      _buildActionChoices(connService, isDark).animate().fadeIn(delay: 300.ms),
-                      const SizedBox(height: 24),
-                      _buildKnownPlayersSection(connService, isDark),
-                      const SizedBox(height: 24),
-                      _buildDevicesHeader(connService, isDark).animate().fadeIn(delay: 400.ms),
-                      const SizedBox(height: 16),
-                      Expanded(
-                        child: _buildDevicesList(connService, isDark),
-                      ),
-                    ],
-                  ),
+              ),
+            ),
           ),
-        ),
+          
+          if (connService.isVerifying)
+            _buildVerificationOverlay(connService, isDark),
+        ],
       ),
     );
   }
@@ -399,57 +545,31 @@ class _LobbyScreenState extends State<LobbyScreen> {
             ),
           ],
         ),
-        IconButton(
-          icon: Icon(
-            Icons.settings_rounded,
-            color: isDark ? Colors.white70 : Colors.black87,
-            size: 28,
-          ),
-          onPressed: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SettingsScreen()),
-            );
-          },
+        Row(
+          children: [
+            IconButton(
+              icon: Icon(
+                Icons.analytics_rounded,
+                color: isDark ? Colors.white70 : Colors.black87,
+                size: 28,
+              ),
+              onPressed: () => _showStatsDialog(connService),
+            ),
+            IconButton(
+              icon: Icon(
+                Icons.settings_rounded,
+                color: isDark ? Colors.white70 : Colors.black87,
+                size: 28,
+              ),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                );
+              },
+            ),
+          ],
         ),
       ],
-    );
-  }
-
-  Widget _buildModeBadge(ConnectivityService connService, bool isDark) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.white.withOpacity(0.06) : Colors.black.withOpacity(0.04),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.06),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            connService.mode == AppConnectivityMode.real
-                ? Icons.bluetooth_audio_rounded
-                : Icons.auto_awesome_rounded,
-            size: 16,
-            color: connService.mode == AppConnectivityMode.real
-                ? const Color(0xFF00F2FE)
-                : const Color(0xFFFF007F),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            connService.mode == AppConnectivityMode.real
-                ? 'Real-P2P (Bluetooth & Wi-Fi)'
-                : 'Demo-Modus (Gegen Offline-KI)',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: isDark ? Colors.white70 : Colors.black87,
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -620,52 +740,79 @@ class _LobbyScreenState extends State<LobbyScreen> {
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
         final peer = connService.discoveredPeers[index];
-        return GlassContainer(
-          borderRadius: 16,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.03),
+        final isKnown = connService.knownPlayers.any((p) => p['id'] == peer.id);
+
+        return GestureDetector(
+          onTap: () => _showPeerOptions(connService, peer),
+          child: GlassContainer(
+            borderRadius: 16,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            border: isKnown ? Border.all(color: const Color(0xFF39FF14), width: 1.5) : null,
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.03),
+                  ),
+                  child: Icon(
+                    Icons.phone_iphone_rounded,
+                    color: isDark ? Colors.white70 : Colors.black87,
+                    size: 20,
+                  ),
                 ),
-                child: Icon(
-                  Icons.phone_iphone_rounded,
-                  color: isDark ? Colors.white70 : Colors.black87,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      peer.name,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        color: isDark ? Colors.white : Colors.black87,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              peer.name,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                                color: isDark ? Colors.white : Colors.black87,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (isKnown) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF39FF14).withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text(
+                                'Bekannt',
+                                style: TextStyle(color: Color(0xFF39FF14), fontSize: 9, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
-                    ),
-                    Text(
-                      peer.state == PeerState.connecting
-                          ? 'Verbinde...'
-                          : 'Bereit zum Verbinden',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: Colors.grey,
+                      Text(
+                        peer.state == PeerState.connecting
+                            ? 'Verbinde...'
+                            : 'Bereit zum Verbinden',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              _buildPeerActionButton(connService, peer),
-            ],
-          ),
-        ).animate().fadeIn().slideY(begin: 0.1, end: 0);
+                _buildPeerActionButton(connService, peer),
+              ],
+            ),
+          ).animate().fadeIn().slideY(begin: 0.1, end: 0),
+        );
       },
     );
   }
@@ -689,16 +836,229 @@ class _LobbyScreenState extends State<LobbyScreen> {
         ),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       ),
-      onPressed: () {
-        if (service.isScanning) {
-          service.invitePeer(peer);
-        } else {
-          service.acceptInvite(peer);
-        }
-      },
+      onPressed: () => _showPeerOptions(service, peer),
       child: const Text(
         'Verbinden',
         style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  Widget _buildVerificationOverlay(ConnectivityService connService, bool isDark) {
+    final theme = Theme.of(context);
+    final pinCode = connService.verificationPin;
+
+    return Container(
+      color: Colors.black.withOpacity(0.85),
+      width: double.infinity,
+      height: double.infinity,
+      child: Center(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24.0),
+            child: GlassContainer(
+              padding: const EdgeInsets.all(28),
+              borderRadius: 24,
+              child: connService.isHost
+                  ? Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.security_rounded,
+                          size: 56,
+                          color: Color(0xFF00F2FE),
+                        ).animate().scaleXY(begin: 0.8, end: 1.2, duration: 1000.ms, curve: Curves.easeInOutBack),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Sicherheits-Verifizierung',
+                          style: theme.textTheme.titleLarge?.copyWith(fontSize: 22, color: Colors.white),
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Gib diesen Code deinem Spielpartner. Er muss ihn auf seinem Gerät eingeben.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.white70, fontSize: 13),
+                        ),
+                        const SizedBox(height: 24),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.06),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: Colors.white10),
+                          ),
+                          child: Text(
+                            pinCode != null ? pinCode.toString() : '----',
+                            style: const TextStyle(
+                              fontSize: 48,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 8,
+                              color: Color(0xFF00F2FE),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white60,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Warte auf Partner...',
+                          style: TextStyle(color: Colors.white54, fontSize: 11, fontStyle: FontStyle.italic),
+                        ),
+                        const SizedBox(height: 16),
+                        TextButton(
+                          onPressed: () => connService.disconnect(),
+                          child: const Text('Abbrechen', style: TextStyle(color: Colors.redAccent)),
+                        ),
+                      ],
+                    )
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.pin_rounded,
+                          size: 56,
+                          color: Color(0xFFFF007F),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'PIN Eingeben',
+                          style: theme.textTheme.titleLarge?.copyWith(fontSize: 22, color: Colors.white),
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Gib den 4-stelligen Verifizierungscode ein, der auf dem Gerät des Hosts angezeigt wird.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.white70, fontSize: 13),
+                        ),
+                        const SizedBox(height: 24),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: List.generate(4, (index) {
+                            String char = '';
+                            if (_enteredPin.length > index) {
+                              char = _enteredPin[index];
+                            }
+                            return Container(
+                              width: 50,
+                              height: 60,
+                              margin: const EdgeInsets.symmetric(horizontal: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.06),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: _enteredPin.length == index
+                                      ? const Color(0xFFFF007F)
+                                      : (char.isNotEmpty ? Colors.white38 : Colors.white10),
+                                  width: 2,
+                                ),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  char,
+                                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
+                                ),
+                              ),
+                            );
+                          }),
+                        ),
+                        if (connService.pinError) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            connService.pinErrorMessage ?? 'Falscher PIN.',
+                            style: const TextStyle(color: Colors.redAccent, fontSize: 13, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                        const SizedBox(height: 24),
+                        Column(
+                          children: [
+                            for (var row in [
+                              ['1', '2', '3'],
+                              ['4', '5', '6'],
+                              ['7', '8', '9'],
+                              ['clear', '0', 'backspace']
+                            ])
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 6),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                  children: [
+                                    for (var val in row)
+                                      SizedBox(
+                                        width: 70,
+                                        height: 50,
+                                        child: val == 'clear'
+                                            ? IconButton(
+                                                icon: const Icon(Icons.clear_rounded, color: Colors.white54),
+                                                onPressed: () {
+                                                  setState(() {
+                                                    _enteredPin = '';
+                                                  });
+                                                  connService.clearPinError();
+                                                },
+                                              )
+                                            : val == 'backspace'
+                                                ? IconButton(
+                                                    icon: const Icon(Icons.backspace_rounded, color: Colors.white54),
+                                                    onPressed: () {
+                                                      if (_enteredPin.isNotEmpty) {
+                                                        setState(() {
+                                                          _enteredPin = _enteredPin.substring(0, _enteredPin.length - 1);
+                                                        });
+                                                        connService.clearPinError();
+                                                      }
+                                                    },
+                                                  )
+                                                : ElevatedButton(
+                                                    style: ElevatedButton.styleFrom(
+                                                      backgroundColor: Colors.white.withOpacity(0.08),
+                                                      foregroundColor: Colors.white,
+                                                      elevation: 0,
+                                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                                    ),
+                                                    onPressed: () {
+                                                      if (_enteredPin.length < 4) {
+                                                        setState(() {
+                                                          _enteredPin += val;
+                                                        });
+                                                        connService.clearPinError();
+                                                        if (_enteredPin.length == 4) {
+                                                          connService.verifyCode(int.parse(_enteredPin));
+                                                        }
+                                                      }
+                                                    },
+                                                    child: Text(
+                                                      val,
+                                                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                                                    ),
+                                                  ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        TextButton(
+                          onPressed: () {
+                            setState(() {
+                              _enteredPin = '';
+                            });
+                            connService.disconnect();
+                          },
+                          child: const Text('Verbindung trennen', style: TextStyle(color: Colors.redAccent)),
+                        ),
+                      ],
+                    ),
+            ),
+          ),
+        ),
       ),
     );
   }

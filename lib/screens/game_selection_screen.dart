@@ -20,6 +20,7 @@ class GameSelectionScreen extends StatefulWidget {
 
 class _GameSelectionScreenState extends State<GameSelectionScreen> {
   StreamSubscription? _msgSubscription;
+  final Set<int> _animatedIndexes = {};
 
   @override
   void initState() {
@@ -489,7 +490,12 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
                           );
                     }
 
-                    return GestureDetector(
+                    final isFirstTime = !_animatedIndexes.contains(index);
+                    if (isFirstTime) {
+                      _animatedIndexes.add(index);
+                    }
+
+                    Widget finalWidget = GestureDetector(
                       onTap: () {
                         if (isHost) {
                           connService.selectGame(game['id'] as String);
@@ -503,7 +509,16 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
                         }
                       },
                       child: card,
-                    ).animate().fadeIn(delay: Duration(milliseconds: 200 + index * 100)).slideX(begin: 0.1, end: 0);
+                    );
+
+                    if (isFirstTime) {
+                      finalWidget = finalWidget
+                          .animate()
+                          .fadeIn(delay: Duration(milliseconds: 200 + index * 100))
+                          .slideX(begin: 0.1, end: 0);
+                    }
+
+                    return finalWidget;
                   },
                 ),
               ),
