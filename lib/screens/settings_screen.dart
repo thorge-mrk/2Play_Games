@@ -197,8 +197,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ],
                           ),
                           CupertinoSwitch(
-                            activeColor: const Color(0xFF8A2387),
-                            trackColor: Colors.grey.withOpacity(0.3),
+                            activeTrackColor: const Color(0xFF8A2387),
+                            inactiveTrackColor:
+                                Colors.grey.withValues(alpha: 0.3),
                             value: connService.isDarkMode,
                             onChanged: (val) => connService.setDarkMode(val),
                           ),
@@ -238,7 +239,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             width: double.infinity,
                             padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
-                              color: isDark ? Colors.black38 : Colors.black.withOpacity(0.05),
+                              color: isDark ? Colors.black38 : Colors.black.withValues(alpha: 0.05),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Row(
@@ -364,7 +365,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       height: 36,
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
-                                        color: const Color(0xFF39FF14).withOpacity(0.12),
+                                        color: const Color(0xFF39FF14).withValues(alpha: 0.12),
                                       ),
                                       child: const Icon(
                                         Icons.person_rounded,

@@ -9,7 +9,7 @@ import 'connectfour_screen.dart';
 import 'battleship_screen.dart';
 import 'rockpaperscissors_screen.dart';
 import 'minigolf_screen.dart';
-import '../widgets/chat_sheet.dart';
+import '../widgets/game_ui.dart';
 
 class GameSelectionScreen extends StatefulWidget {
   const GameSelectionScreen({super.key});
@@ -70,6 +70,7 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
       MaterialPageRoute(builder: (_) => gameScreen),
     ).then((_) {
       // When popping back from a game, let the connection service know we exited
+      if (!mounted) return;
       final connService = Provider.of<ConnectivityService>(context, listen: false);
       if (connService.activeGameId != null && connService.isHost) {
         connService.exitGame();
@@ -173,52 +174,11 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
                     ),
                     Row(
                       children: [
-                        IconButton(
-                          icon: Stack(
-                            clipBehavior: Clip.none,
-                            children: [
-                              Icon(Icons.chat_bubble_rounded, color: isDark ? Colors.white70 : Colors.black87, size: 26),
-                              if (connService.unreadChatCount > 0)
-                                Positioned(
-                                  right: -4,
-                                  top: -4,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(2),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFFF007F),
-                                      shape: BoxShape.circle,
-                                      border: Border.all(color: isDark ? const Color(0xFF0F0B1E) : Colors.white, width: 1.5),
-                                    ),
-                                    constraints: const BoxConstraints(
-                                      minWidth: 16,
-                                      minHeight: 16,
-                                    ),
-                                    child: Text(
-                                      '${connService.unreadChatCount}',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                      textAlign: TextAlign.center,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          onPressed: () {
-                            showModalBottomSheet(
-                              context: context,
-                              isScrollControlled: true,
-                              backgroundColor: Colors.transparent,
-                              builder: (_) => const ChatSheet(),
-                            );
-                          },
-                        ),
+                        const ChatIconButton(),
                         const SizedBox(width: 8),
                         ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red.withOpacity(0.1),
+                            backgroundColor: Colors.red.withValues(alpha: 0.1),
                             foregroundColor: Colors.redAccent,
                             elevation: 0,
                             shape: RoundedRectangleBorder(
@@ -309,7 +269,7 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFFFF007F).withOpacity(0.4),
+                            color: const Color(0xFFFF007F).withValues(alpha: 0.4),
                             blurRadius: 12,
                             spreadRadius: 1,
                           ),
@@ -339,7 +299,7 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
                                   'Tippe hier, um das Spiel fortzusetzen.',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: Colors.white.withOpacity(0.9),
+                                    color: Colors.white.withValues(alpha: 0.9),
                                   ),
                                 ),
                               ],
@@ -359,13 +319,17 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
 
               const SizedBox(height: 24),
 
-              // Games List
+              // Games List (width-limited so it stays readable on tablets)
               Expanded(
                 child: ListView.separated(
                   physics: const BouncingScrollPhysics(),
-                  padding: const EdgeInsets.only(left: 20, right: 20, bottom: 20),
+                  padding: EdgeInsets.only(
+                    left: 20,
+                    right: 20,
+                    bottom: 20 + MediaQuery.of(context).padding.bottom,
+                  ),
                   itemCount: games.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 16),
+                  separatorBuilder: (_, _) => const SizedBox(height: 16),
                   itemBuilder: (context, index) {
                     final game = games[index];
                     final isHost = connService.isHost;
@@ -427,7 +391,7 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                         decoration: BoxDecoration(
-                                          color: isHost ? const Color(0xFF00F2FE).withOpacity(0.15) : const Color(0xFF8A2387).withOpacity(0.15),
+                                          color: isHost ? const Color(0xFF00F2FE).withValues(alpha: 0.15) : const Color(0xFF8A2387).withValues(alpha: 0.15),
                                           borderRadius: BorderRadius.circular(10),
                                           border: Border.all(
                                             color: isHost ? const Color(0xFF00F2FE) : const Color(0xFF8A2387),
@@ -481,7 +445,7 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
                           .boxShadow(
                             begin: const BoxShadow(color: Colors.transparent, blurRadius: 0),
                             end: BoxShadow(
-                              color: isHost ? const Color(0xFF00F2FE).withOpacity(0.4) : const Color(0xFF8A2387).withOpacity(0.4),
+                              color: isHost ? const Color(0xFF00F2FE).withValues(alpha: 0.4) : const Color(0xFF8A2387).withValues(alpha: 0.4),
                               blurRadius: 12,
                               spreadRadius: 1,
                             ),
@@ -518,7 +482,12 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
                           .slideX(begin: 0.1, end: 0);
                     }
 
-                    return finalWidget;
+                    return Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 640),
+                        child: finalWidget,
+                      ),
+                    );
                   },
                 ),
               ),

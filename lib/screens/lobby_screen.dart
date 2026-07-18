@@ -477,7 +477,7 @@ class _KnownPlayersRow extends StatelessWidget {
           scrollDirection: Axis.horizontal,
           physics: const BouncingScrollPhysics(),
           itemCount: svc.knownPlayers.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 10),
+          separatorBuilder: (_, _) => const SizedBox(width: 10),
           itemBuilder: (ctx, i) {
             final player  = svc.knownPlayers[i];
             final name    = player['name'] ?? 'Spieler';
@@ -595,7 +595,7 @@ class _DevicesList extends StatelessWidget {
     return ListView.separated(
       physics: const BouncingScrollPhysics(),
       itemCount: peers.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (ctx, i) {
         final peer    = peers[i];
         final isBot   = peer.isMock;

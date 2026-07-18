@@ -237,8 +237,10 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.paused   ||
+    // Only tear down on real backgrounding – "inactive" also fires for
+    // temporary interruptions (control center, incoming call, app switcher)
+    // and would needlessly kill an active session.
+    if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       if (isConnected) sendPayload({'type': 'game_exit'});
       disconnect();
@@ -517,7 +519,10 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
 
     if (peer.isMock) {
-      // Simulate bot connection
+      // Against the bot the local player is always the host: the bot only
+      // ever reacts to moves, so the human must be the first mover in every
+      // game (otherwise TicTacToe/Connect4/Battleship/Minigolf deadlock).
+      _isHost = true;
       Timer(const Duration(milliseconds: 800), () {
         if (isConnected) return; // already connected by other means
         _connectedPeer = peer.copyWith(state: PeerState.connected);
@@ -923,19 +928,26 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
 
     switch (type) {
       case 'game_select':
-      case 'game_exit':
         _handleIncomingPayload(payload);
+        break;
+
+      case 'game_exit':
+        // Update state directly instead of echoing the payload back through
+        // the message stream – the sending screen already popped itself and
+        // an echoed 'game_exit' would pop a second (wrong) route.
+        _updatePlayTime();
+        _activeGameId    = null;
+        _suggestedGameId = null;
+        notifyListeners();
         break;
 
       case 'game_suggest':
         _handleIncomingPayload(payload);
-        // Bot auto-accepts game suggestion after a short delay (scanner suggested)
-        if (!_isHost) {
-          Timer(const Duration(milliseconds: 1200), () {
-            if (!isConnected || _activeGameId != null) return;
-            selectGame(payload['gameId'] as String);
-          });
-        }
+        // Bot auto-accepts game suggestion after a short delay
+        Timer(const Duration(milliseconds: 1200), () {
+          if (!isConnected || _activeGameId != null) return;
+          selectGame(payload['gameId'] as String);
+        });
         break;
 
       case 'game_move':
@@ -1019,8 +1031,11 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
     for (final l in lines) {
       int cnt = 0, empty = -1;
       for (final i in l) {
-        if (board[i] == sym) cnt++;
-        else if (board[i].isEmpty) empty = i;
+        if (board[i] == sym) {
+          cnt++;
+        } else if (board[i].isEmpty) {
+          empty = i;
+        }
       }
       if (cnt == 2 && empty != -1) return empty;
     }
@@ -1072,21 +1087,37 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
 
   bool _c4CheckWin(List<List<int>> b, int p) {
     // Horizontal
-    for (int r = 0; r < 6; r++)
-      for (int c = 0; c < 4; c++)
-        if (b[c][r]==p && b[c+1][r]==p && b[c+2][r]==p && b[c+3][r]==p) return true;
+    for (int r = 0; r < 6; r++) {
+      for (int c = 0; c < 4; c++) {
+        if (b[c][r]==p && b[c+1][r]==p && b[c+2][r]==p && b[c+3][r]==p) {
+          return true;
+        }
+      }
+    }
     // Vertical
-    for (int c = 0; c < 7; c++)
-      for (int r = 0; r < 3; r++)
-        if (b[c][r]==p && b[c][r+1]==p && b[c][r+2]==p && b[c][r+3]==p) return true;
+    for (int c = 0; c < 7; c++) {
+      for (int r = 0; r < 3; r++) {
+        if (b[c][r]==p && b[c][r+1]==p && b[c][r+2]==p && b[c][r+3]==p) {
+          return true;
+        }
+      }
+    }
     // Diagonal /
-    for (int c = 0; c < 4; c++)
-      for (int r = 3; r < 6; r++)
-        if (b[c][r]==p && b[c+1][r-1]==p && b[c+2][r-2]==p && b[c+3][r-3]==p) return true;
+    for (int c = 0; c < 4; c++) {
+      for (int r = 3; r < 6; r++) {
+        if (b[c][r]==p && b[c+1][r-1]==p && b[c+2][r-2]==p && b[c+3][r-3]==p) {
+          return true;
+        }
+      }
+    }
     // Diagonal \
-    for (int c = 0; c < 4; c++)
-      for (int r = 0; r < 3; r++)
-        if (b[c][r]==p && b[c+1][r+1]==p && b[c+2][r+2]==p && b[c+3][r+3]==p) return true;
+    for (int c = 0; c < 4; c++) {
+      for (int r = 0; r < 3; r++) {
+        if (b[c][r]==p && b[c+1][r+1]==p && b[c+2][r+2]==p && b[c+3][r+3]==p) {
+          return true;
+        }
+      }
+    }
     return false;
   }
 
@@ -1152,12 +1183,16 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
         final x = _rng.nextInt(10), y = _rng.nextInt(10);
         if (horiz && x + size <= 10) {
           if ([for (int i = 0; i < size; i++) board[y][x+i]].every((v) => v == 0)) {
-            for (int i = 0; i < size; i++) board[y][x+i] = 1;
+            for (int i = 0; i < size; i++) {
+              board[y][x+i] = 1;
+            }
             placed = true;
           }
         } else if (!horiz && y + size <= 10) {
           if ([for (int i = 0; i < size; i++) board[y+i][x]].every((v) => v == 0)) {
-            for (int i = 0; i < size; i++) board[y+i][x] = 1;
+            for (int i = 0; i < size; i++) {
+              board[y+i][x] = 1;
+            }
             placed = true;
           }
         }
