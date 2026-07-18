@@ -277,6 +277,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ],
                             ),
                           ),
+                          const SizedBox(height: 10),
+                          Text(
+                            switch (connService.botDifficulty) {
+                              'einfach' =>
+                                'Der Bot macht viele Fehler – ideal zum Üben.',
+                              'schwer' =>
+                                'Der Bot spielt nahezu perfekt – echte Herausforderung!',
+                              _ =>
+                                'Ausgeglichenes Duell mit gelegentlichen Fehlern.',
+                            },
+                            style: const TextStyle(
+                                fontSize: 12, color: Colors.grey),
+                          ),
                         ],
                       ),
                     ).animate().fadeIn(delay: 200.ms, duration: 400.ms),
@@ -490,16 +503,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  String _gameDisplayName(String key) {
-    switch (key) {
-      case 'tictactoe': return 'Tic-Tac-Toe';
-      case 'connect4': return 'Vier Gewinnt';
-      case 'battleship': return 'Schiffe Versenken';
-      case 'rockpaperscissors': return 'Schere, Stein, Papier';
-      case 'minigolf': return 'Minigolf';
-      default: return key;
-    }
-  }
+  String _gameDisplayName(String key) =>
+      ConnectivityService.gameNames[key] ?? key;
 
   Widget _buildSectionHeader(BuildContext context, String title) {
     final isDark = Theme.of(context).brightness == Brightness.dark;

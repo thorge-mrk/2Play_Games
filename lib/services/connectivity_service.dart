@@ -164,16 +164,24 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
   Map<String, Map<String, int>> get gameStats           => _gameStats;
   int                           get totalPlayTimeSeconds => _totalPlayTimeSeconds;
 
+  /// Display names of all games, keyed by game id.
+  static const Map<String, String> gameNames = {
+    'tictactoe':         'Tic-Tac-Toe',
+    'connect4':          'Vier Gewinnt',
+    'battleship':        'Schiffe Versenken',
+    'rockpaperscissors': 'Schere, Stein, Papier',
+    'minigolf':          'Minigolf',
+    'memory':            'Memory',
+    'dotsboxes':         'Käsekästchen',
+    'nim':               'Streichholz-Duell',
+    'reaction':          'Reaktionsduell',
+    'pig':               'Würfelduell',
+  };
+
   String get favoriteGame {
     String bestGame = 'Keines';
     int    maxPlays = -1;
-    const names = {
-      'tictactoe':         'Tic-Tac-Toe',
-      'connect4':          'Vier Gewinnt',
-      'battleship':        'Schiffe Versenken',
-      'rockpaperscissors': 'Schere, Stein, Papier',
-      'minigolf':          'Minigolf',
-    };
+    const names = gameNames;
     _gameStats.forEach((id, stats) {
       final plays = stats['play_count'] ?? 0;
       if (plays > maxPlays && plays > 0) {
@@ -288,7 +296,7 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
 
   void _initDefaultStats() {
     _gameStats = {
-      for (final id in ['tictactoe', 'connect4', 'battleship', 'rockpaperscissors', 'minigolf'])
+      for (final id in gameNames.keys)
         id: {'wins_vs_bot': 0, 'losses_vs_bot': 0, 'wins_vs_player': 0, 'losses_vs_player': 0, 'play_count': 0},
     };
   }
@@ -510,6 +518,22 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
   // ─────────────────────────────────────────────────────────────────────────
   // Connection Actions
   // ─────────────────────────────────────────────────────────────────────────
+
+  /// Connects directly to the bot – no scanning or waiting required.
+  Future<void> playWithBot() async {
+    if (isConnected) return;
+    await stopScanning();
+    await stopAdvertising();
+    _isHost = true;
+    _connectedPeer = const AppPeer(
+      id: 'mock_bot',
+      name: '2Play Bot',
+      state: PeerState.connected,
+      isMock: true,
+    );
+    _discoveredPeers = [_connectedPeer!];
+    notifyListeners();
+  }
 
   /// Scanner (client) taps "Verbinden".
   Future<void> invitePeer(AppPeer peer) async {

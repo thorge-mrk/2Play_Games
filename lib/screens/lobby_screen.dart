@@ -247,6 +247,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
         ).animate().fadeIn(delay: 150.ms).slideY(begin: 0.08, end: 0),
         const SizedBox(height: 20),
         _ActionTiles(svc: svc, isDark: isDark),
+        const SizedBox(height: 12),
+        _BotQuickPlayTile(svc: svc, isDark: isDark),
         const SizedBox(height: 20),
         _KnownPlayersRow(
           svc:      svc,
@@ -293,6 +295,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
           child: Column(children: [
             const SizedBox(height: 12),
             _ActionTiles(svc: svc, isDark: isDark),
+            const SizedBox(height: 10),
+            _BotQuickPlayTile(svc: svc, isDark: isDark),
             const SizedBox(height: 16),
             _DevicesHeader(svc: svc, isDark: isDark),
             const SizedBox(height: 8),
@@ -450,6 +454,189 @@ class _ActionTiles extends StatelessWidget {
                   color: active ? Colors.white70 : Colors.grey),
               textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis),
         ]),
+      ),
+    );
+  }
+}
+
+/// Prominent tile to start a bot match instantly – no scanning, no waiting.
+/// Lets the player pick the difficulty right before starting.
+class _BotQuickPlayTile extends StatelessWidget {
+  final ConnectivityService svc;
+  final bool isDark;
+  const _BotQuickPlayTile({required this.svc, required this.isDark});
+
+  static const _difficulties = [
+    ('einfach', 'Einfach', 'Bot macht viele Fehler'),
+    ('mittel', 'Mittel', 'Ausgeglichenes Duell'),
+    ('schwer', 'Schwer', 'Bot spielt nahezu perfekt'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => _showDifficultyDialog(context),
+      child: GlassContainer(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        borderRadius: 18,
+        border: Border.all(
+            color: const Color(0xFFB44FFF).withValues(alpha: 0.5),
+            width: 1.5),
+        child: Row(children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFFB44FFF).withValues(alpha: 0.12),
+            ),
+            child: const Icon(Icons.smart_toy_rounded,
+                color: Color(0xFFB44FFF), size: 24),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Sofort gegen Bot spielen',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: isDark ? Colors.white : Colors.black87)),
+                const SizedBox(height: 2),
+                Text(
+                  'Kein Warten – Schwierigkeit: ${_label(svc.botDifficulty)}',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: isDark ? Colors.white54 : Colors.black54),
+                ),
+              ],
+            ),
+          ),
+          const Icon(Icons.play_circle_fill_rounded,
+              color: Color(0xFFB44FFF), size: 30),
+        ]),
+      ),
+    );
+  }
+
+  String _label(String key) =>
+      _difficulties.firstWhere((d) => d.$1 == key).$2;
+
+  void _showDifficultyDialog(BuildContext context) {
+    String selected = svc.botDifficulty;
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final dialogDark = Theme.of(ctx).brightness == Brightness.dark;
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.all(32),
+            child: GlassContainer(
+              padding: const EdgeInsets.all(24),
+              borderRadius: 24,
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.smart_toy_rounded,
+                    size: 48, color: Color(0xFFB44FFF)),
+                const SizedBox(height: 12),
+                Text('Gegen den Bot spielen',
+                    style: Theme.of(ctx)
+                        .textTheme
+                        .titleLarge
+                        ?.copyWith(fontSize: 19)),
+                const SizedBox(height: 6),
+                Text(
+                  'Wähle die Schwierigkeit – du kannst sie auch im Spiel jederzeit ändern.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: dialogDark ? Colors.white54 : Colors.black54),
+                ),
+                const SizedBox(height: 16),
+                for (final (key, label, desc) in _difficulties)
+                  GestureDetector(
+                    onTap: () => setDialogState(() => selected = key),
+                    child: Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: selected == key
+                            ? const Color(0xFFB44FFF).withValues(alpha: 0.15)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: selected == key
+                              ? const Color(0xFFB44FFF)
+                              : (dialogDark
+                                  ? Colors.white12
+                                  : Colors.black12),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Row(children: [
+                        Icon(
+                          selected == key
+                              ? Icons.radio_button_checked_rounded
+                              : Icons.radio_button_off_rounded,
+                          size: 18,
+                          color: selected == key
+                              ? const Color(0xFFB44FFF)
+                              : Colors.grey,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(label,
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                      color: dialogDark
+                                          ? Colors.white
+                                          : Colors.black87)),
+                              Text(desc,
+                                  style: const TextStyle(
+                                      fontSize: 10, color: Colors.grey)),
+                            ],
+                          ),
+                        ),
+                      ]),
+                    ),
+                  ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFB44FFF),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      svc.setBotDifficulty(selected);
+                      svc.playWithBot();
+                    },
+                    icon: const Icon(Icons.play_arrow_rounded),
+                    label: const Text('Los geht\'s!',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 15)),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: Text('Abbrechen',
+                      style: TextStyle(
+                          color:
+                              dialogDark ? Colors.white54 : Colors.black54)),
+                ),
+              ]),
+            ),
+          );
+        },
       ),
     );
   }
@@ -860,14 +1047,7 @@ class _StatsDialog extends StatelessWidget {
   final ConnectivityService svc;
   const _StatsDialog({required this.svc});
 
-  String _gameName(String key) {
-    const m = {
-      'tictactoe': 'Tic-Tac-Toe', 'connect4': 'Vier Gewinnt',
-      'battleship': 'Schiffe Versenken', 'rockpaperscissors': 'Schere, Stein, Papier',
-      'minigolf': 'Minigolf',
-    };
-    return m[key] ?? key;
-  }
+  String _gameName(String key) => ConnectivityService.gameNames[key] ?? key;
 
   @override
   Widget build(BuildContext context) {

@@ -9,6 +9,11 @@ import 'connectfour_screen.dart';
 import 'battleship_screen.dart';
 import 'rockpaperscissors_screen.dart';
 import 'minigolf_screen.dart';
+import 'memory_screen.dart';
+import 'dotsboxes_screen.dart';
+import 'nim_screen.dart';
+import 'reaction_screen.dart';
+import 'pig_screen.dart';
 import '../widgets/game_ui.dart';
 
 class GameSelectionScreen extends StatefulWidget {
@@ -61,6 +66,21 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
         break;
       case 'minigolf':
         gameScreen = const MinigolfScreen();
+        break;
+      case 'memory':
+        gameScreen = const MemoryScreen();
+        break;
+      case 'dotsboxes':
+        gameScreen = const DotsBoxesScreen();
+        break;
+      case 'nim':
+        gameScreen = const NimScreen();
+        break;
+      case 'reaction':
+        gameScreen = const ReactionScreen();
+        break;
+      case 'pig':
+        gameScreen = const PigScreen();
         break;
       default:
         return;
@@ -126,6 +146,41 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
         'desc': 'Bringe den Ball mit möglichst wenigen Schlägen ins Loch! 50 Levels & Turnier-Modus.',
         'icon': Icons.flag_rounded,
         'colors': [Colors.green[600]!, Colors.teal],
+      },
+      {
+        'id': 'memory',
+        'title': 'Memory',
+        'desc': 'Finde mehr Paare als dein Gegner! Ein Treffer bringt einen Extrazug.',
+        'icon': Icons.style_rounded,
+        'colors': [const Color(0xFF9C27B0), const Color(0xFFE91E63)],
+      },
+      {
+        'id': 'dotsboxes',
+        'title': 'Käsekästchen',
+        'desc': 'Schließe Kästchen mit cleveren Linien – wer mehr Kästchen holt, gewinnt!',
+        'icon': Icons.grid_on_rounded,
+        'colors': [const Color(0xFF00897B), const Color(0xFF43A047)],
+      },
+      {
+        'id': 'nim',
+        'title': 'Streichholz-Duell',
+        'desc': 'Nimm 1-3 Streichhölzer. Wer das letzte nehmen muss, verliert!',
+        'icon': Icons.local_fire_department_rounded,
+        'colors': [const Color(0xFFFF7043), const Color(0xFFD84315)],
+      },
+      {
+        'id': 'reaction',
+        'title': 'Reaktionsduell',
+        'desc': 'Warte auf Grün und tippe blitzschnell – wer zuerst 3 Runden holt, gewinnt!',
+        'icon': Icons.flash_on_rounded,
+        'colors': [const Color(0xFFFFB300), const Color(0xFFF57C00)],
+      },
+      {
+        'id': 'pig',
+        'title': 'Würfelduell',
+        'desc': 'Würfle und sammle Punkte – aber Vorsicht: Eine 1 kostet die ganze Runde!',
+        'icon': Icons.casino_rounded,
+        'colors': [const Color(0xFF3949AB), const Color(0xFF00ACC1)],
       },
     ];
 
