@@ -157,7 +157,7 @@ class _TicTacToeScreenState extends State<TicTacToeScreen> {
     final connService = Provider.of<ConnectivityService>(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    if (!connService.isConnected) {
+    if (!connService.hasSession) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
       });

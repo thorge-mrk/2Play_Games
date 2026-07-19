@@ -104,7 +104,7 @@ class _GameSelectionScreenState extends State<GameSelectionScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     // Guard: Return to lobby if connection is lost
-    if (!connService.isConnected) {
+    if (!connService.hasSession) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         Navigator.of(context).popUntil((route) => route.isFirst);
       });

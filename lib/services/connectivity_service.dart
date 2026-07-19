@@ -139,10 +139,18 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
   // ── Connection ───────────────────────────────────────────────────────────
   AppPeer? _connectedPeer;
   bool     _isHost = false;
+  bool     _isReconnecting = false;
+  Timer?   _reconnectDeadlineTimer;
+  Timer?   _reconnectRetryTimer;
 
   AppPeer? get connectedPeer => _connectedPeer;
   bool     get isConnected   => _connectedPeer?.state == PeerState.connected;
   bool     get isHost        => _isHost;
+  bool     get isReconnecting => _isReconnecting;
+
+  /// True while a session is alive – including a short reconnect window
+  /// after a transport drop (e.g. switching from Bluetooth to WLAN).
+  bool get hasSession => isConnected || _isReconnecting;
 
   // ── Handshake & PIN ──────────────────────────────────────────────────────
   _HandshakeState _handshakeState = _HandshakeState.idle;
@@ -237,6 +245,8 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
     _botTimer?.cancel();
     _advertiserBotTimer?.cancel();
     _verifyTimeoutTimer?.cancel();
+    _reconnectRetryTimer?.cancel();
+    _reconnectDeadlineTimer?.cancel();
     _subState?.cancel();
     _subData?.cancel();
     _msgCtrl.close();
@@ -375,6 +385,11 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
     _knownPlayers.removeWhere((p) => p['id'] == id);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyKnownPlayers, jsonEncode(_knownPlayers));
+    // If we are connected to this player right now, tell them immediately
+    // so their UI can show that the friendship ended.
+    if (isConnected && _connectedPeer?.id == id) {
+      sendPayload({'type': 'friend_removed', 'name': _myUsername});
+    }
     notifyListeners();
   }
 
@@ -438,6 +453,9 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> startAdvertising() async {
     if (_isAdvertising) return;
+    // Serialize native calls: overlapping stop/start of the Multipeer
+    // browser/advertiser is a known crash source on iOS.
+    if (_isScanning) await stopScanning();
     _isAdvertising = true;
     _isHost = true;
     _discoveredPeers = [];
@@ -445,6 +463,11 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
 
     try { await _nearbyService?.startAdvertisingPeer(); } catch (e) {
       debugPrint('startAdvertising error: $e');
+    }
+    // Also browse while advertising so BOTH sides see each other in the
+    // known-players list (a pure advertiser discovers nobody otherwise).
+    try { await _nearbyService?.startBrowsingForPeers(); } catch (e) {
+      debugPrint('startAdvertising browse error: $e');
     }
 
     // After 5 s without a real connection: show the bot invite dialog
@@ -481,10 +504,16 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
     try { await _nearbyService?.stopAdvertisingPeer(); } catch (e) {
       debugPrint('stopAdvertising error: $e');
     }
+    if (!_isScanning) {
+      try { await _nearbyService?.stopBrowsingForPeers(); } catch (e) {
+        debugPrint('stopAdvertising browse error: $e');
+      }
+    }
   }
 
   Future<void> startScanning() async {
     if (_isScanning) return;
+    if (_isAdvertising) await stopAdvertising();
     _isScanning = true;
     _discoveredPeers = [];
     _showMockBots = false;
@@ -611,9 +640,57 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
+  /// Starts a 15-second window in which we try to re-establish a dropped
+  /// connection before tearing the session down.
+  void _startReconnectWindow() {
+    final peer = _connectedPeer;
+    if (peer == null) return;
+    _isReconnecting = true;
+    _connectedPeer = peer.copyWith(state: PeerState.connecting);
+    notifyListeners();
+
+    _reconnectRetryTimer?.cancel();
+    _reconnectRetryTimer =
+        Timer.periodic(const Duration(seconds: 3), (_) async {
+      if (isConnected) return;
+      try {
+        await _nearbyService?.invitePeer(
+            deviceID: peer.id, deviceName: peer.name);
+      } catch (e) {
+        debugPrint('reconnect invite error: $e');
+      }
+    });
+
+    _reconnectDeadlineTimer?.cancel();
+    _reconnectDeadlineTimer = Timer(const Duration(seconds: 15), () {
+      if (!isConnected) {
+        _cancelReconnect();
+        _teardownSession();
+      }
+    });
+  }
+
+  void _cancelReconnect() {
+    _isReconnecting = false;
+    _reconnectRetryTimer?.cancel();
+    _reconnectDeadlineTimer?.cancel();
+  }
+
+  void _teardownSession() {
+    _connectedPeer = null;
+    _activeGameId  = null;
+    _suggestedGameId = null;
+    _chatMessages.clear();
+    _unreadChatCount = 0;
+    _updatePlayTime();
+    _resetHandshake();
+    notifyListeners();
+  }
+
   Future<void> disconnect() async {
     _updatePlayTime();
     _verifyTimeoutTimer?.cancel();
+    _cancelReconnect();
 
     final peer   = _connectedPeer;
     if (peer == null) return;
@@ -668,6 +745,16 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
 
     final weKnowThem    = _connectedPeer != null && isKnownPlayer(_connectedPeer!.id);
     final mutuallyKnown = weKnowThem && isPeerKnown;
+
+    // We saved them as a known player, but they no longer know us:
+    // they removed the friendship. Let the UI ask what to do.
+    if (weKnowThem && !isPeerKnown) {
+      _msgCtrl.add({
+        'type': 'friend_removed_by_peer',
+        'peerId': _connectedPeer!.id,
+        'peerName': peerName,
+      });
+    }
 
     // If we haven't sent our handshake yet (we received first), send it now
     if (_handshakeState == _HandshakeState.idle) {
@@ -837,16 +924,21 @@ class ConnectivityService extends ChangeNotifier with WidgetsBindingObserver {
         if (connected.id.isNotEmpty) {
           final alreadyConnected = _connectedPeer?.state == PeerState.connected
               && _connectedPeer?.id == connected.id;
+          final wasReconnecting = _isReconnecting
+              && _connectedPeer?.id == connected.id;
+          _cancelReconnect();
           _connectedPeer = connected;
           if (!alreadyConnected) {
-            _isHost = _isAdvertising;
+            if (!wasReconnecting) _isHost = _isAdvertising;
             _initiateHandshake();
           }
-        } else if (_connectedPeer != null && !_connectedPeer!.isMock) {
-          _connectedPeer = null;
-          _activeGameId  = null;
-          _updatePlayTime();
-          _resetHandshake();
+        } else if (_connectedPeer != null &&
+            !_connectedPeer!.isMock &&
+            !_isReconnecting) {
+          // Transport dropped (e.g. Bluetooth out of range while WLAN takes
+          // over). Give the connection a grace window instead of killing the
+          // session instantly.
+          _startReconnectWindow();
         }
 
         notifyListeners();

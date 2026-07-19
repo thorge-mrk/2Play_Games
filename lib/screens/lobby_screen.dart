@@ -51,8 +51,97 @@ class _LobbyScreenState extends State<LobbyScreen> {
         case 'invite_blocked':
           _showSnack('Du wurdest blockiert.', const Color(0xFFB00020), Icons.block_rounded);
           break;
+
+        case 'friend_removed_by_peer':
+          _showFriendRemovedDialog(
+            payload['peerId'] as String? ?? '',
+            payload['peerName'] as String? ?? 'Spieler',
+          );
+          break;
+
+        case 'friend_removed':
+          final svc = Provider.of<ConnectivityService>(context, listen: false);
+          final peer = svc.connectedPeer;
+          if (peer != null) {
+            _showFriendRemovedDialog(peer.id, payload['name'] as String? ?? peer.name);
+          }
+          break;
       }
     });
+  }
+
+  /// Shown when the other player has removed us from their known players.
+  void _showFriendRemovedDialog(String peerId, String peerName) {
+    if (!mounted) return;
+    final svc = Provider.of<ConnectivityService>(context, listen: false);
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(32),
+        child: GlassContainer(
+          padding: const EdgeInsets.all(24),
+          borderRadius: 24,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.person_off_rounded,
+                size: 48, color: Colors.orangeAccent),
+            const SizedBox(height: 14),
+            Text('Keine Freundschaft mehr',
+                style: Theme.of(ctx).textTheme.titleLarge?.copyWith(fontSize: 19)),
+            const SizedBox(height: 8),
+            Text(
+              '$peerName hat dich als Mitspieler entfernt. '
+              'Ihr könnt weiterspielen, dann ist aber eine PIN-Verifizierung nötig.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF8A2387),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Weiterspielen (mit PIN)',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.redAccent,
+                  side: const BorderSide(color: Colors.redAccent),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                  svc.removeKnownPlayer(peerId);
+                  svc.disconnect();
+                  _showSnack('$peerName wurde ebenfalls entfernt.',
+                      const Color(0xFF444444), Icons.person_off_rounded);
+                },
+                child: const Text('Freund auch entfernen & trennen',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                svc.disconnect();
+              },
+              child: const Text('Abbrechen (nur trennen)',
+                  style: TextStyle(color: Colors.grey)),
+            ),
+          ]),
+        ),
+      ),
+    );
   }
 
   void _showSnack(String msg, Color bg, IconData icon) {
@@ -398,7 +487,6 @@ class _ActionTiles extends StatelessWidget {
           if (svc.isAdvertising) {
             svc.stopAdvertising();
           } else {
-            svc.stopScanning();
             svc.startAdvertising();
           }
         },
@@ -416,7 +504,6 @@ class _ActionTiles extends StatelessWidget {
           if (svc.isScanning) {
             svc.stopScanning();
           } else {
-            svc.stopAdvertising();
             svc.startScanning();
           }
         },

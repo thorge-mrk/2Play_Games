@@ -164,7 +164,7 @@ class _NimScreenState extends State<NimScreen> {
     final svc = Provider.of<ConnectivityService>(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    if (!svc.isConnected) {
+    if (!svc.hasSession) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
       });
