@@ -1,11 +1,10 @@
 import 'dart:async';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../services/connectivity_service.dart';
 import '../theme/app_theme.dart';
-import '../widgets/chat_sheet.dart';
+import '../widgets/game_ui.dart';
 
 class BattleshipScreen extends StatefulWidget {
   const BattleshipScreen({super.key});
@@ -14,12 +13,14 @@ class BattleshipScreen extends StatefulWidget {
   State<BattleshipScreen> createState() => _BattleshipScreenState();
 }
 
-class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerProviderStateMixin {
+class _BattleshipScreenState extends State<BattleshipScreen>
+    with SingleTickerProviderStateMixin {
   // Board states: 10x10. 0 = Empty, 1 = Ship, 2 = Hit, 3 = Miss
-  List<List<int>> _myBoard = List.generate(10, (_) => List.generate(10, (_) => 0));
-  List<List<int>> _opponentBoard = List.generate(10, (_) => List.generate(10, (_) => 0)); // What we fired at
+  List<List<int>> _myBoard = List.generate(10, (_) => List.filled(10, 0));
+  List<List<int>> _opponentBoard =
+      List.generate(10, (_) => List.filled(10, 0));
 
-  // Placement Phase states
+  // Placement phase
   bool _isPlacementPhase = true;
   final List<int> _shipSizes = [5, 4, 3, 3, 2];
   int _currentShipIndex = 0;
@@ -27,9 +28,9 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
   bool _iAmReady = false;
   bool _opponentIsReady = false;
 
-  // Battle Phase states
+  // Battle phase
   late TabController _tabController;
-  bool _myTurn = true; // Host starts
+  bool _myTurn = true;
   StreamSubscription? _msgSubscription;
   bool _isGameOver = false;
   bool _iWon = false;
@@ -40,88 +41,94 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    
-    final connService = Provider.of<ConnectivityService>(context, listen: false);
+
+    final connService =
+        Provider.of<ConnectivityService>(context, listen: false);
     _myTurn = connService.isHost; // Host fires first
 
-    _msgSubscription = connService.messageStream.listen((payload) {
-      if (payload['type'] == 'game_move' && payload['gameId'] == 'battleship') {
-        final data = payload['data'] as Map<String, dynamic>;
-        final subtype = data['subtype'] as String?;
+    _msgSubscription = connService.messageStream.listen(_onMessage);
+  }
 
-        if (subtype == 'player_ready') {
-          setState(() {
-            _opponentIsReady = true;
-            _checkStartBattle();
-          });
-        } else if (subtype == 'ai_ready') {
-          // AI generated board
-          setState(() {
-            _opponentIsReady = true;
-            // Record AI board secretly for hit checking
-            // Map AI board as 1s (unhit ships) in its own board
-            _opponentBoard = List<List<int>>.from(
-              (data['aiBoard'] as List).map((row) => List<int>.from(row))
-            );
-            _checkStartBattle();
-          });
-        } else if (subtype == 'fire') {
-          // Opponent fired at our grid
-          final tx = data['x'] as int;
-          final ty = data['y'] as int;
-          final hit = _myBoard[ty][tx] == 1;
-          
-          setState(() {
-            _myBoard[ty][tx] = hit ? 2 : 3;
-            _myTurn = true; // It's our turn now
-            _checkWinState();
-          });
+  void _onMessage(Map<String, dynamic> payload) {
+    if (!mounted) return;
+    final connService =
+        Provider.of<ConnectivityService>(context, listen: false);
 
-          // Report back the result
-          connService.sendPayload({
-            'type': 'game_move',
-            'gameId': 'battleship',
-            'data': {
-              'subtype': 'fire_result',
-              'x': tx,
-              'y': ty,
-              'isHit': hit,
-              'winnerName': _isGameOver && !_iWon ? connService.connectedPeer?.name : null,
-            }
-          });
-        } else if (subtype == 'fire_result') {
-          final tx = data['x'] as int;
-          final ty = data['y'] as int;
-          final isHit = data['isHit'] as bool;
-          
-          setState(() {
-            // Update what we see on opponent's ocean
-            _opponentBoard[ty][tx] = isHit ? 2 : 3;
-            _myTurn = false; // Opponent's turn
-            _checkWinState();
-          });
-        } else if (subtype == 'ai_fire') {
-          // AI fired at us – board state comes pre-computed from the bot
-          setState(() {
-            _myBoard = List<List<int>>.from(
-              (data['userBoard'] as List).map((row) => List<int>.from(row))
-            );
-            _myTurn = true;
-            _checkWinState();
-          });
-        }
-      } else if (payload['type'] == 'game_reset' && payload['gameId'] == 'battleship') {
-        connService.sendPayload({
-          'type': 'game_reset_accept',
-          'gameId': 'battleship',
+    if (payload['type'] == 'game_move' && payload['gameId'] == 'battleship') {
+      final data = payload['data'] as Map<String, dynamic>;
+      final subtype = data['subtype'] as String?;
+
+      if (subtype == 'player_ready') {
+        setState(() {
+          _opponentIsReady = true;
+          _checkStartBattle();
         });
-        _resetBoard();
-      } else if (payload['type'] == 'game_reset_accept' && payload['gameId'] == 'battleship') {
-        _resetBoard();
-      } else if (payload['type'] == 'game_exit') {
-        Navigator.of(context).pop();
+      } else if (subtype == 'ai_ready') {
+        setState(() {
+          _opponentIsReady = true;
+          // The bot's fleet layout, kept locally for hit checking.
+          _opponentBoard = [
+            for (final row in data['aiBoard'] as List) List<int>.from(row)
+          ];
+          _checkStartBattle();
+        });
+      } else if (subtype == 'fire') {
+        // Opponent fired at our grid.
+        final tx = data['x'] as int;
+        final ty = data['y'] as int;
+        final cell = _myBoard[ty][tx];
+        // Ignore duplicate shots on an already resolved cell.
+        if (cell == 2 || cell == 3) return;
+        final hit = cell == 1;
+
+        setState(() {
+          _myBoard[ty][tx] = hit ? 2 : 3;
+          _myTurn = true;
+          _checkWinState();
+        });
+
+        connService.sendPayload({
+          'type': 'game_move',
+          'gameId': 'battleship',
+          'data': {
+            'subtype': 'fire_result',
+            'x': tx,
+            'y': ty,
+            'isHit': hit,
+          }
+        });
+      } else if (subtype == 'fire_result') {
+        final tx = data['x'] as int;
+        final ty = data['y'] as int;
+        final isHit = data['isHit'] as bool;
+
+        setState(() {
+          _opponentBoard[ty][tx] = isHit ? 2 : 3;
+          _checkWinState();
+        });
+      } else if (subtype == 'ai_fire') {
+        // The bot fired at us – board state comes pre-computed.
+        setState(() {
+          _myBoard = [
+            for (final row in data['userBoard'] as List) List<int>.from(row)
+          ];
+          _myTurn = true;
+          _checkWinState();
+        });
       }
-    });
+    } else if (payload['type'] == 'game_reset' &&
+        payload['gameId'] == 'battleship') {
+      connService.sendPayload({
+        'type': 'game_reset_accept',
+        'gameId': 'battleship',
+      });
+      _resetBoard();
+    } else if (payload['type'] == 'game_reset_accept' &&
+        payload['gameId'] == 'battleship') {
+      _resetBoard();
+    } else if (payload['type'] == 'game_exit') {
+      Navigator.of(context).pop();
+    }
   }
 
   @override
@@ -132,12 +139,12 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
   }
 
   void _checkStartBattle() {
-    if (_iAmReady && _opponentIsReady) {
-      setState(() {
-        _isPlacementPhase = false;
-      });
+    if (_iAmReady && _opponentIsReady && _isPlacementPhase) {
+      _isPlacementPhase = false;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Kampfphase gestartet! Feuer frei!'), backgroundColor: Color(0xFF8A2387)),
+        const SnackBar(
+            content: Text('Kampfphase gestartet! Feuer frei!'),
+            backgroundColor: AppTheme.primaryPurple),
       );
     }
   }
@@ -146,22 +153,21 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
     if (_currentShipIndex >= _shipSizes.length || _iAmReady) return;
 
     final size = _shipSizes[_currentShipIndex];
-    if (_canPlaceShip(x, y, size, _isHorizontal)) {
-      setState(() {
-        for (int i = 0; i < size; i++) {
-          if (_isHorizontal) {
-            _myBoard[y][x + i] = 1;
-          } else {
-            _myBoard[y + i][x] = 1;
-          }
+    if (!_canPlaceShip(x, y, size, _isHorizontal)) return;
+
+    setState(() {
+      for (int i = 0; i < size; i++) {
+        if (_isHorizontal) {
+          _myBoard[y][x + i] = 1;
+        } else {
+          _myBoard[y + i][x] = 1;
         }
-        _currentShipIndex++;
-        if (_currentShipIndex == _shipSizes.length) {
-          // Auto-ready once all are placed
-          _setPlayerReady();
-        }
-      });
-    }
+      }
+      _currentShipIndex++;
+      if (_currentShipIndex == _shipSizes.length) {
+        _setPlayerReady();
+      }
+    });
   }
 
   bool _canPlaceShip(int x, int y, int size, bool horizontal) {
@@ -177,6 +183,14 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
       }
     }
     return true;
+  }
+
+  void _undoPlacement() {
+    if (_iAmReady || _currentShipIndex == 0) return;
+    setState(() {
+      _myBoard = List.generate(10, (_) => List.filled(10, 0));
+      _currentShipIndex = 0;
+    });
   }
 
   void _setPlayerReady() {
@@ -197,13 +211,13 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
 
   void _fireAtOpponent(int x, int y) {
     if (_isPlacementPhase || !_myTurn || _isGameOver) return;
-    if (_opponentBoard[y][x] == 2 || _opponentBoard[y][x] == 3) return; // Already targeted
+    if (_opponentBoard[y][x] == 2 || _opponentBoard[y][x] == 3) return;
 
-    final connService = Provider.of<ConnectivityService>(context, listen: false);
+    final connService =
+        Provider.of<ConnectivityService>(context, listen: false);
 
     if (connService.connectedPeer?.isMock == true) {
-      // In simulator, AI board holds the ships. We calculate hit locally using _opponentBoard as the AI's actual fleet board.
-      // (Normally _opponentBoard is what we've fired at, but in simulator we use it as their board).
+      // Vs. bot: _opponentBoard holds the bot's actual fleet.
       final isHit = _opponentBoard[y][x] == 1;
       setState(() {
         _opponentBoard[y][x] = isHit ? 2 : 3;
@@ -211,7 +225,6 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
         _checkWinState();
       });
 
-      // Notify service so AI can generate fire move back
       connService.sendPayload({
         'type': 'game_move',
         'gameId': 'battleship',
@@ -223,7 +236,8 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
         }
       });
     } else {
-      // Real Mode: Send fire coordinate, wait for fire_result reply
+      // Real mode: turn ends immediately so quick taps can't double-fire.
+      setState(() => _myTurn = false);
       connService.sendPayload({
         'type': 'game_move',
         'gameId': 'battleship',
@@ -237,11 +251,9 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
   }
 
   void _checkWinState() {
-    
-    // Total ship squares is 5 + 4 + 3 + 3 + 2 = 17
+    // Total ship squares: 5 + 4 + 3 + 3 + 2 = 17
     int myHits = 0;
     int opponentHits = 0;
-
     for (int r = 0; r < 10; r++) {
       for (int c = 0; c < 10; c++) {
         if (_myBoard[r][c] == 2) myHits++;
@@ -250,36 +262,30 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
     }
 
     if (opponentHits == 17) {
-      setState(() {
-        _isGameOver = true;
-        _iWon = true;
-      });
+      _isGameOver = true;
+      _iWon = true;
       _updateStats();
     } else if (myHits == 17) {
-      setState(() {
-        _isGameOver = true;
-        _iWon = false;
-      });
+      _isGameOver = true;
+      _iWon = false;
       _updateStats();
     }
   }
 
   void _updateStats() {
     if (_statsUpdated) return;
-    final connService = Provider.of<ConnectivityService>(context, listen: false);
+    _statsUpdated = true;
+    final connService =
+        Provider.of<ConnectivityService>(context, listen: false);
     if (_iWon) {
       connService.incrementWin('battleship');
-      _statsUpdated = true;
     } else {
       connService.incrementLoss('battleship');
-      _statsUpdated = true;
     }
   }
 
   void _requestReset() {
-    setState(() {
-      _waitingForResetAccept = true;
-    });
+    setState(() => _waitingForResetAccept = true);
     Provider.of<ConnectivityService>(context, listen: false).sendPayload({
       'type': 'game_reset',
       'gameId': 'battleship',
@@ -288,8 +294,8 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
 
   void _resetBoard() {
     setState(() {
-      _myBoard = List.generate(10, (_) => List.generate(10, (_) => 0));
-      _opponentBoard = List.generate(10, (_) => List.generate(10, (_) => 0));
+      _myBoard = List.generate(10, (_) => List.filled(10, 0));
+      _opponentBoard = List.generate(10, (_) => List.filled(10, 0));
       _isPlacementPhase = true;
       _currentShipIndex = 0;
       _iAmReady = false;
@@ -299,76 +305,16 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
       _waitingForResetAccept = false;
       _tabController.index = 0;
       _statsUpdated = false;
-      
-      final connService = Provider.of<ConnectivityService>(context, listen: false);
-      _myTurn = connService.isHost;
+      _myTurn =
+          Provider.of<ConnectivityService>(context, listen: false).isHost;
     });
   }
 
-  void _exitGame() async {
-    final shouldExit = await _showExitConfirmationDialog();
-    if (shouldExit) {
-      final connService = Provider.of<ConnectivityService>(context, listen: false);
-      connService.disconnect();
-    }
-  }
-
-  Future<bool> _showExitConfirmationDialog() async {
-    final result = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: Colors.transparent,
-          contentPadding: EdgeInsets.zero,
-          content: GlassContainer(
-            padding: const EdgeInsets.all(24),
-            borderRadius: 24,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.warning_amber_rounded,
-                  size: 48,
-                  color: Colors.redAccent,
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Spiel beenden?',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Möchtest du das Spiel wirklich beenden? Dies bricht das Spiel für beide Spieler ab und trennt die Verbindung.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white70, fontSize: 13),
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.of(ctx).pop(false),
-                      child: const Text('Nein, weiterspielen', style: TextStyle(color: Colors.white70)),
-                    ),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.redAccent,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      onPressed: () => Navigator.of(ctx).pop(true),
-                      child: const Text('Ja, beenden'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-    return result ?? false;
+  Future<void> _exitGame() async {
+    final shouldExit = await showExitGameDialog(context);
+    if (!shouldExit || !mounted) return;
+    Provider.of<ConnectivityService>(context, listen: false).exitGame();
+    if (mounted) Navigator.of(context).pop();
   }
 
   @override
@@ -376,128 +322,132 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
     final connService = Provider.of<ConnectivityService>(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // Guard dropped connection
     if (!connService.isConnected) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
       });
       return const SizedBox();
     }
 
-
     return PopScope(
       canPop: false,
-      onPopInvoked: (didPop) async {
+      onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
         _exitGame();
       },
       child: Scaffold(
-        body: Container(
-        decoration: BoxDecoration(
-          gradient: isDark
-              ? const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFF0F0B1E), Color(0xFF130A29), Color(0xFF0F0B1E)],
-                )
-              : const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFFF4F6FB), Color(0xFFE9EEF6), Color(0xFFF7F8FC)],
+        body: AppBackground(
+          child: Stack(
+            children: [
+              SafeArea(
+                child: Column(
+                  children: [
+                    GameHeader(title: 'Schiffe Versenken', onExit: _exitGame),
+                    if (_isPlacementPhase)
+                      Expanded(child: _buildPlacementView(isDark))
+                    else
+                      Expanded(child: _buildBattleView(isDark)),
+                  ],
                 ),
-        ),
-        child: Stack(
-          children: [
-            SafeArea(
-              child: Column(
-                children: [
-                  // Header
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        IconButton(
-                          icon: Icon(Icons.arrow_back_ios_new_rounded, color: isDark ? Colors.white70 : Colors.black87),
-                          onPressed: _exitGame,
-                        ),
-                        Expanded(
-                          child: Center(
-                            child: Text(
-                              'Schiffe Versenken',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                                color: isDark ? Colors.white : Colors.black87,
-                              ),
-                            ),
-                          ),
-                        ),
-                        _buildBotDifficultySwitcher(connService),
-                        IconButton(
-                          icon: Stack(
-                            clipBehavior: Clip.none,
-                            children: [
-                              Icon(Icons.chat_bubble_rounded, color: isDark ? Colors.white70 : Colors.black87, size: 24),
-                              if (connService.unreadChatCount > 0)
-                                Positioned(
-                                  right: -4,
-                                  top: -4,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(2),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFFF007F),
-                                      shape: BoxShape.circle,
-                                      border: Border.all(color: isDark ? const Color(0xFF0F0B1E) : Colors.white, width: 1.5),
-                                    ),
-                                    constraints: const BoxConstraints(
-                                      minWidth: 16,
-                                      minHeight: 16,
-                                    ),
-                                    child: Text(
-                                      '${connService.unreadChatCount}',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 8,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                      textAlign: TextAlign.center,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          onPressed: () {
-                            showModalBottomSheet(
-                              context: context,
-                              isScrollControlled: true,
-                              backgroundColor: Colors.transparent,
-                              builder: (_) => const ChatSheet(),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  if (_isPlacementPhase)
-                    Expanded(child: _buildPlacementView(isDark))
-                  else
-                    Expanded(child: _buildBattleView(isDark, connService)),
-                ],
               ),
-            ),
-            if (_isGameOver) _buildGameOverOverlay(context, isDark, connService),
-          ],
+              if (_isGameOver) _buildGameOverOverlay(),
+            ],
+          ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   Widget _buildPlacementView(bool isDark) {
-    final remainingShips = _shipSizes.length - _currentShipIndex;
-    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+    final isLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
+
+    final infoCard = GlassContainer(
+      padding: const EdgeInsets.all(14),
+      borderRadius: 16,
+      child: Row(
+        children: [
+          Icon(
+            Icons.help_outline_rounded,
+            color: isDark ? const Color(0xFF00F2FE) : AppTheme.primaryPurple,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              _iAmReady
+                  ? 'Warte auf Gegner...'
+                  : 'Platziere deine Schiffe. Tippe auf das Gitter zum Platzieren.',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white70 : Colors.black87,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    final controls = _iAmReady
+        ? const SizedBox.shrink()
+        : GlassContainer(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            borderRadius: 16,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Nächstes Schiff: ${_currentShipIndex < _shipSizes.length ? _shipSizes[_currentShipIndex] : '-'} Felder',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                      Text(
+                        'Noch ${_shipSizes.length - _currentShipIndex} Schiffe',
+                        style:
+                            const TextStyle(color: Colors.grey, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Platzierung zurücksetzen',
+                  onPressed: _currentShipIndex > 0 ? _undoPlacement : null,
+                  icon: const Icon(Icons.restart_alt_rounded, size: 20),
+                ),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryPurple,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () =>
+                      setState(() => _isHorizontal = !_isHorizontal),
+                  icon: Icon(
+                      _isHorizontal
+                          ? Icons.swap_horiz_rounded
+                          : Icons.swap_vert_rounded,
+                      size: 18),
+                  label: Text(_isHorizontal ? 'Horizontal' : 'Vertikal',
+                      style: const TextStyle(fontSize: 12)),
+                ),
+              ],
+            ),
+          );
+
+    final grid = Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520, maxHeight: 520),
+        child: AspectRatio(
+          aspectRatio: 1.0,
+          child: _buildPlacementGrid(isDark),
+        ),
+      ),
+    );
 
     if (isLandscape) {
       return Padding(
@@ -505,90 +455,20 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Left column: Instructions and orientation toggles
             Expanded(
               flex: 4,
               child: SingleChildScrollView(
                 child: Column(
                   children: [
-                    // Help card
-                    GlassContainer(
-                      padding: const EdgeInsets.all(12),
-                      borderRadius: 16,
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.help_outline_rounded,
-                            color: isDark ? const Color(0xFF00F2FE) : const Color(0xFF8A2387),
-                            size: 20,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _iAmReady
-                                  ? 'Warte auf Gegner...'
-                                  : 'Platziere Schiffe. Tippe auf das Gitter.',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: isDark ? Colors.white70 : Colors.black87,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                    infoCard,
                     const SizedBox(height: 12),
-                    // Placement Controls
-                    if (!_iAmReady)
-                      GlassContainer(
-                        padding: const EdgeInsets.all(12),
-                        borderRadius: 16,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text(
-                              'Nächstes Schiff: Gr. ${_shipSizes[_currentShipIndex]}',
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                            ),
-                            Text(
-                              'Noch $remainingShips Schiffe zu platzieren',
-                              style: const TextStyle(color: Colors.grey, fontSize: 10),
-                            ),
-                            const SizedBox(height: 12),
-                            ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF8A2387),
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                padding: const EdgeInsets.symmetric(vertical: 10),
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  _isHorizontal = !_isHorizontal;
-                                });
-                              },
-                              icon: Icon(_isHorizontal ? Icons.swap_horiz_rounded : Icons.swap_vert_rounded, size: 16),
-                              label: Text(_isHorizontal ? 'Horizontal' : 'Vertikal', style: const TextStyle(fontSize: 12)),
-                            ),
-                          ],
-                        ),
-                      ),
+                    controls,
                   ],
                 ),
               ),
             ),
             const SizedBox(width: 16),
-            // Right column: placement grid
-            Expanded(
-              flex: 5,
-              child: Center(
-                child: AspectRatio(
-                  aspectRatio: 1.0,
-                  child: _buildPlacementGrid(isDark),
-                ),
-              ),
-            ),
+            Expanded(flex: 5, child: grid),
           ],
         ),
       );
@@ -598,83 +478,12 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
       padding: const EdgeInsets.symmetric(horizontal: 16.0),
       child: Column(
         children: [
-          const SizedBox(height: 10),
-          // Help card
-          GlassContainer(
-            padding: const EdgeInsets.all(16),
-            borderRadius: 20,
-            child: Row(
-              children: [
-                Icon(
-                  Icons.help_outline_rounded,
-                  color: isDark ? const Color(0xFF00F2FE) : const Color(0xFF8A2387),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    _iAmReady
-                        ? 'Warte auf Gegner...'
-                        : 'Platziere deine Schiffe. Tippe auf das Gitter zum Platzieren.',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white70 : Colors.black87,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          
-          const SizedBox(height: 16),
-
-          // Placement Controls
-          if (!_iAmReady)
-            GlassContainer(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              borderRadius: 16,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Nächstes Schiff: Gr. ${_shipSizes[_currentShipIndex]}',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                      ),
-                      Text(
-                        'Noch $remainingShips Schiffe zu platzieren',
-                        style: const TextStyle(color: Colors.grey, fontSize: 11),
-                      ),
-                    ],
-                  ),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF8A2387),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _isHorizontal = !_isHorizontal;
-                      });
-                    },
-                    icon: Icon(_isHorizontal ? Icons.swap_horiz_rounded : Icons.swap_vert_rounded),
-                    label: Text(_isHorizontal ? 'Horizontal' : 'Vertikal'),
-                  ),
-                ],
-              ),
-            ),
-
+          const SizedBox(height: 8),
+          infoCard,
+          const SizedBox(height: 12),
+          controls,
           const Spacer(),
-
-          // Grid View
-          AspectRatio(
-            aspectRatio: 1.0,
-            child: _buildPlacementGrid(isDark),
-          ),
-
+          grid,
           const Spacer(),
         ],
       ),
@@ -701,18 +510,23 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
             child: Container(
               decoration: BoxDecoration(
                 color: cellVal == 1
-                    ? const Color(0xFF8A2387).withOpacity(0.5)
-                    : (isDark ? Colors.white.withOpacity(0.02) : Colors.black.withOpacity(0.01)),
+                    ? AppTheme.primaryPurple.withValues(alpha: 0.5)
+                    : (isDark
+                        ? Colors.white.withValues(alpha: 0.02)
+                        : Colors.black.withValues(alpha: 0.01)),
                 border: Border.all(
-                  color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
+                  color: isDark
+                      ? Colors.white10
+                      : Colors.black.withValues(alpha: 0.05),
                   width: 0.5,
                 ),
               ),
               child: cellVal == 1
                   ? const Center(
-                      child: Icon(Icons.directions_boat_rounded, size: 14, color: Colors.white),
+                      child: Icon(Icons.directions_boat_rounded,
+                          size: 14, color: Colors.white),
                     )
-                  : const SizedBox(),
+                  : null,
             ),
           );
         },
@@ -720,78 +534,77 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
     );
   }
 
-  Widget _buildBattleView(bool isDark, ConnectivityService service) {
-    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+  Widget _buildBattleView(bool isDark) {
+    final isLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
+
+    final turnBanner = _isGameOver
+        ? const SizedBox.shrink()
+        : Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+            decoration: BoxDecoration(
+              color: _myTurn
+                  ? AppTheme.primaryPurple
+                      .withValues(alpha: isDark ? 0.1 : 0.05)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              _myTurn ? 'Du bist am Zug! Feuere!' : 'Gegner wählt Ziel...',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: _myTurn
+                    ? (isDark
+                        ? const Color(0xFF00F2FE)
+                        : AppTheme.primaryPurple)
+                    : (isDark ? Colors.white60 : Colors.black54),
+              ),
+            ),
+          );
+
+    Widget boxedGrid(Widget grid) => Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480, maxHeight: 480),
+            child: AspectRatio(aspectRatio: 1.0, child: grid),
+          ),
+        );
 
     if (isLandscape) {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
         child: Column(
           children: [
-            // Turn Status / Game Over info bar
-            if (!_isGameOver)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-                margin: const EdgeInsets.only(bottom: 8),
-                decoration: BoxDecoration(
-                  color: _myTurn
-                      ? (isDark ? const Color(0xFF8A2387).withOpacity(0.1) : Colors.purple.withOpacity(0.05))
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  _myTurn ? 'Du bist am Zug! Feuere!' : 'Gegner wählt Ziel...',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    color: _myTurn
-                        ? (isDark ? const Color(0xFF00F2FE) : const Color(0xFF8A2387))
-                        : (isDark ? Colors.white60 : Colors.black54),
-                  ),
-                ),
-              ),
-            // The two grids side-by-side
+            turnBanner,
+            const SizedBox(height: 8),
             Expanded(
               child: Row(
                 children: [
-                  // My fleet grid (Mein Ozean)
                   Expanded(
                     child: Column(
                       children: [
-                        const Text(
-                          'Meine Flotte',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey),
-                        ),
+                        const Text('Meine Flotte',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                                color: Colors.grey)),
                         const SizedBox(height: 4),
-                        Expanded(
-                          child: Center(
-                            child: AspectRatio(
-                              aspectRatio: 1.0,
-                              child: _buildMyOceanGrid(isDark),
-                            ),
-                          ),
-                        ),
+                        Expanded(child: boxedGrid(_buildMyOceanGrid(isDark))),
                       ],
                     ),
                   ),
                   const SizedBox(width: 16),
-                  // Attack target grid (Angriff)
                   Expanded(
                     child: Column(
                       children: [
-                        const Text(
-                          'Angriff (Ziel)',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey),
-                        ),
+                        const Text('Angriff (Ziel)',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                                color: Colors.grey)),
                         const SizedBox(height: 4),
-                        Expanded(
-                          child: Center(
-                            child: AspectRatio(
-                              aspectRatio: 1.0,
-                              child: _buildAttackGrid(isDark),
-                            ),
-                          ),
-                        ),
+                        Expanded(child: boxedGrid(_buildAttackGrid(isDark))),
                       ],
                     ),
                   ),
@@ -805,12 +618,13 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
 
     return Column(
       children: [
-        // Tab Headers to switch view
         Container(
           margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
           padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(
-            color: isDark ? Colors.black26 : Colors.black.withOpacity(0.05),
+            color: isDark
+                ? Colors.black26
+                : Colors.black.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(16),
           ),
           child: TabBar(
@@ -822,7 +636,8 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
             ),
             indicatorSize: TabBarIndicatorSize.tab,
             labelColor: isDark ? Colors.white : Colors.black87,
-            labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+            labelStyle:
+                const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
             unselectedLabelColor: Colors.grey,
             dividerColor: Colors.transparent,
             tabs: const [
@@ -831,61 +646,25 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
             ],
           ),
         ),
-
-        const SizedBox(height: 10),
-
-        // Turn Status / Game Over
-        if (!_isGameOver)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-            decoration: BoxDecoration(
-              color: _myTurn
-                  ? (isDark ? const Color(0xFF8A2387).withOpacity(0.1) : Colors.purple.withOpacity(0.05))
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text(
-              _myTurn ? 'Du bist am Zug! Feuere!' : 'Gegner wählt Ziel...',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: _myTurn
-                    ? (isDark ? const Color(0xFF00F2FE) : const Color(0xFF8A2387))
-                    : (isDark ? Colors.white60 : Colors.black54),
-              ),
-            ),
-          ),
-
-        const Spacer(),
-
-        // Ocean Grid View
+        const SizedBox(height: 6),
+        turnBanner,
+        const SizedBox(height: 6),
         Expanded(
-          flex: 8,
           child: TabBarView(
             controller: _tabController,
             children: [
-              // Tab 1: Opponent ocean (Where we fire)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                child: AspectRatio(
-                  aspectRatio: 1.0,
-                  child: _buildAttackGrid(isDark),
-                ),
+                child: boxedGrid(_buildAttackGrid(isDark)),
               ),
-
-              // Tab 2: My ocean (Where opponent fires)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                child: AspectRatio(
-                  aspectRatio: 1.0,
-                  child: _buildMyOceanGrid(isDark),
-                ),
+                child: boxedGrid(_buildMyOceanGrid(isDark)),
               ),
             ],
           ),
         ),
-        
-        const Spacer(),
+        const SizedBox(height: 12),
       ],
     );
   }
@@ -908,16 +687,16 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
           return Container(
             decoration: BoxDecoration(
               color: cellVal == 1
-                  ? const Color(0xFF00F2FE).withOpacity(0.15)
-                  : (isDark ? const Color(0xFF0B0F19) : Colors.white),
+                  ? const Color(0xFF00F2FE).withValues(alpha: 0.15)
+                  : (isDark ? AppTheme.darkBg : Colors.white),
               border: Border.all(
-                color: isDark ? const Color(0xFF00F2FE).withOpacity(0.15) : Colors.black.withOpacity(0.05),
+                color: isDark
+                    ? const Color(0xFF00F2FE).withValues(alpha: 0.15)
+                    : Colors.black.withValues(alpha: 0.05),
                 width: 0.5,
               ),
             ),
-            child: Center(
-              child: _buildMyFleetIndicator(cellVal),
-            ),
+            child: Center(child: _FleetCell(value: cellVal)),
           );
         },
       ),
@@ -943,15 +722,15 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
             onTap: () => _fireAtOpponent(x, y),
             child: Container(
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF0B0F19) : Colors.white,
+                color: isDark ? AppTheme.darkBg : Colors.white,
                 border: Border.all(
-                  color: isDark ? const Color(0xFF00F2FE).withOpacity(0.15) : Colors.black.withOpacity(0.05),
+                  color: isDark
+                      ? const Color(0xFF00F2FE).withValues(alpha: 0.15)
+                      : Colors.black.withValues(alpha: 0.05),
                   width: 0.5,
                 ),
               ),
-              child: Center(
-                child: _buildAttackIndicator(cellVal),
-              ),
+              child: Center(child: _AttackCell(value: cellVal)),
             ),
           );
         },
@@ -959,56 +738,81 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
     );
   }
 
-  Widget _buildAttackIndicator(int val) {
-    if (val == 2) {
+  Widget _buildGameOverOverlay() {
+    return GameResultOverlay(
+      title: _iWon ? 'SIEG!' : 'NIEDERLAGE!',
+      description: _iWon
+          ? 'Alle gegnerischen Schiffe wurden erfolgreich versenkt!'
+          : 'Deine Flotte wurde vollständig vernichtet!',
+      color: _iWon ? Colors.greenAccent : Colors.redAccent,
+      icon: _iWon
+          ? Icons.emoji_events_rounded
+          : Icons.sentiment_very_dissatisfied_rounded,
+      onExit: _exitGame,
+      onRematch: _requestReset,
+      waitingForRematch: _waitingForResetAccept,
+    );
+  }
+}
+
+/// Cell of the attack grid. Hits/misses animate once (no endless repaint).
+class _AttackCell extends StatelessWidget {
+  final int value;
+  const _AttackCell({required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    if (value == 2) {
       return Container(
         margin: const EdgeInsets.all(4),
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: const Color(0xFFFF007F).withOpacity(0.3),
-          border: Border.all(color: const Color(0xFFFF007F), width: 2),
-          boxShadow: AppTheme.neonGlow(const Color(0xFFFF007F)),
+          color: AppTheme.accentNeonPink.withValues(alpha: 0.3),
+          border: Border.all(color: AppTheme.accentNeonPink, width: 2),
         ),
         child: const Center(
           child: Icon(Icons.close_rounded, size: 12, color: Colors.white),
         ),
-      ).animate(onPlay: (c) => c.repeat())
-       .scaleXY(begin: 0.9, end: 1.1, duration: 800.ms, curve: Curves.easeInOut);
-    } else if (val == 3) {
+      )
+          .animate()
+          .scaleXY(begin: 0.4, end: 1.0, duration: 300.ms, curve: Curves.easeOutBack);
+    } else if (value == 3) {
       return Container(
         width: 8,
         height: 8,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: const Color(0xFF00F2FE).withOpacity(0.4),
-          boxShadow: AppTheme.neonGlow(const Color(0xFF00F2FE)),
+          color: const Color(0xFF00F2FE).withValues(alpha: 0.5),
         ),
-      ).animate(onPlay: (c) => c.repeat())
-       .scaleXY(begin: 0.8, end: 1.6, duration: 1500.ms, curve: Curves.easeInOut)
-       .fadeOut(duration: 1500.ms);
+      ).animate().scaleXY(begin: 0.4, end: 1.0, duration: 250.ms);
     }
-    return const SizedBox();
+    return const SizedBox.shrink();
   }
+}
 
-  Widget _buildMyFleetIndicator(int val) {
-    if (val == 1) {
-      return const Icon(Icons.directions_boat_rounded, size: 14, color: Color(0xFF00F2FE))
-          .animate(onPlay: (c) => c.repeat(reverse: true))
-          .scaleXY(begin: 0.95, end: 1.05, duration: 1500.ms);
-    } else if (val == 2) {
+/// Cell of my fleet grid.
+class _FleetCell extends StatelessWidget {
+  final int value;
+  const _FleetCell({required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    if (value == 1) {
+      return const Icon(Icons.directions_boat_rounded,
+          size: 14, color: Color(0xFF00F2FE));
+    } else if (value == 2) {
       return Container(
         margin: const EdgeInsets.all(4),
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: const Color(0xFFFF007F).withOpacity(0.4),
-          border: Border.all(color: const Color(0xFFFF007F), width: 2),
-          boxShadow: AppTheme.neonGlow(const Color(0xFFFF007F)),
+          color: AppTheme.accentNeonPink.withValues(alpha: 0.4),
+          border: Border.all(color: AppTheme.accentNeonPink, width: 2),
         ),
         child: const Center(
           child: Icon(Icons.close_rounded, size: 10, color: Colors.white),
         ),
       ).animate().shake(duration: 300.ms);
-    } else if (val == 3) {
+    } else if (value == 3) {
       return Container(
         width: 6,
         height: 6,
@@ -1018,147 +822,6 @@ class _BattleshipScreenState extends State<BattleshipScreen> with SingleTickerPr
         ),
       );
     }
-    return const SizedBox();
-  }
-
-  Widget _buildGameOverOverlay(BuildContext context, bool isDark, ConnectivityService connService) {
-    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
-    final winColor = _iWon ? Colors.greenAccent : Colors.redAccent;
-    final title = _iWon ? 'SIEG!' : 'NIEDERLAGE!';
-    final desc = _iWon
-        ? 'Alle gegnerischen Schiffe wurden erfolgreich versenkt!'
-        : 'Deine Flotte wurde vollständig vernichtet!';
-
-    return Positioned.fill(
-      child: Container(
-        color: Colors.black.withOpacity(0.75),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-          child: Center(
-            child: SingleChildScrollView(
-              child: Container(
-                width: isLandscape ? 420 : 310,
-                padding: const EdgeInsets.all(24),
-                margin: const EdgeInsets.symmetric(horizontal: 24),
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF161B26) : Colors.white,
-                  borderRadius: BorderRadius.circular(28),
-                  border: Border.all(
-                    color: winColor.withOpacity(0.6),
-                    width: 2,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: winColor.withOpacity(0.2),
-                      blurRadius: 20,
-                      spreadRadius: 2,
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      _iWon ? Icons.emoji_events_rounded : Icons.sentiment_very_dissatisfied_rounded,
-                      size: 64,
-                      color: winColor,
-                    ).animate().scaleXY(begin: 0.8, end: 1.2, duration: 800.ms, curve: Curves.bounceOut),
-                    const SizedBox(height: 16),
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 2,
-                        color: winColor,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      desc,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: isDark ? Colors.white70 : Colors.black87,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            style: OutlinedButton.styleFrom(
-                              side: BorderSide(color: isDark ? Colors.white24 : Colors.black26),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                            onPressed: _exitGame,
-                            child: Text(
-                              'Beenden',
-                              style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF8A2387),
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                            onPressed: _waitingForResetAccept ? null : _requestReset,
-                            child: _waitingForResetAccept
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                  )
-                                : const Text('Revanche', style: TextStyle(fontWeight: FontWeight.bold)),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBotDifficultySwitcher(ConnectivityService connService) {
-    if (connService.connectedPeer?.isMock != true) return const SizedBox();
-    
-    return Container(
-      margin: const EdgeInsets.only(right: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withOpacity(0.15)),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: connService.botDifficulty,
-          dropdownColor: AppTheme.darkCard,
-          icon: const Icon(Icons.arrow_drop_down, color: Colors.white70, size: 18),
-          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-          onChanged: (val) {
-            if (val != null) {
-              connService.setBotDifficulty(val);
-            }
-          },
-          items: const [
-            DropdownMenuItem(value: 'einfach', child: Text('🤖 Einfach')),
-            DropdownMenuItem(value: 'mittel', child: Text('🤖 Mittel')),
-            DropdownMenuItem(value: 'schwer', child: Text('🤖 Schwer')),
-          ],
-        ),
-      ),
-    );
+    return const SizedBox.shrink();
   }
 }

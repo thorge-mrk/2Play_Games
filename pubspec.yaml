@@ -52,8 +52,9 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
 
+# The app ships iOS-only – launcher icons are generated just for iOS.
 flutter_launcher_icons:
-  android: true
+  android: false
   ios: true
   image_path: "assets/images/app_icon_dark.png"
   remove_alpha_ios: true

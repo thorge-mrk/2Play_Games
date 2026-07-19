@@ -89,7 +89,7 @@ class _ChatSheetState extends State<ChatSheet> {
         border: Border.all(color: borderColor, width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.3 : 0.08),
+            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.08),
             blurRadius: 24,
             offset: const Offset(0, 12),
           ),
@@ -244,10 +244,10 @@ class _ChatSheetState extends State<ChatSheet> {
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.04),
+                        color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.04),
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
-                          color: isDark ? Colors.white10 : Colors.black.withOpacity(0.06),
+                          color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.06),
                         ),
                       ),
                       child: Text(

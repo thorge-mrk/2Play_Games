@@ -186,7 +186,7 @@ class GolfLevel {
           name = 'Bewegliche Wache $i';
           par = 4;
           movers.add(MovingObstacle(
-            id: 'slider_${i}',
+            id: 'slider_$i',
             initialRect: const Rect.fromLTWH(80, 220, 100, 20),
             dx: 1.2,
             range: 100,

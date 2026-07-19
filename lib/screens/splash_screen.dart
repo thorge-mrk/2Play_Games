@@ -23,7 +23,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
   void _startLoading() {
     const steps = 100;
-    const duration = Duration(milliseconds: 2500);
+    const duration = Duration(milliseconds: 1400);
     final interval = duration.inMilliseconds ~/ steps;
 
     _timer = Timer.periodic(Duration(milliseconds: interval), (timer) {
@@ -108,11 +108,11 @@ class _SplashScreenState extends State<SplashScreen> {
                   shadows: isDark
                       ? [
                           Shadow(
-                            color: const Color(0xFF00F2FE).withOpacity(0.8),
+                            color: const Color(0xFF00F2FE).withValues(alpha: 0.8),
                             blurRadius: 20,
                           ),
                           Shadow(
-                            color: const Color(0xFF8A2387).withOpacity(0.8),
+                            color: const Color(0xFF8A2387).withValues(alpha: 0.8),
                             blurRadius: 40,
                           ),
                         ]
@@ -129,7 +129,7 @@ class _SplashScreenState extends State<SplashScreen> {
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 4,
-                  color: isDark ? const Color(0xFFC5C2E7).withOpacity(0.7) : Colors.grey[600],
+                  color: isDark ? const Color(0xFFC5C2E7).withValues(alpha: 0.7) : Colors.grey[600],
                 ),
               ).animate().fadeIn(delay: 300.ms, duration: 600.ms),
 

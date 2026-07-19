@@ -197,8 +197,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ],
                           ),
                           CupertinoSwitch(
-                            activeColor: const Color(0xFF8A2387),
-                            trackColor: Colors.grey.withOpacity(0.3),
+                            activeTrackColor: const Color(0xFF8A2387),
+                            inactiveTrackColor:
+                                Colors.grey.withValues(alpha: 0.3),
                             value: connService.isDarkMode,
                             onChanged: (val) => connService.setDarkMode(val),
                           ),
@@ -238,7 +239,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             width: double.infinity,
                             padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
-                              color: isDark ? Colors.black38 : Colors.black.withOpacity(0.05),
+                              color: isDark ? Colors.black38 : Colors.black.withValues(alpha: 0.05),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Row(
@@ -275,6 +276,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   ),
                               ],
                             ),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            switch (connService.botDifficulty) {
+                              'einfach' =>
+                                'Der Bot macht viele Fehler – ideal zum Üben.',
+                              'schwer' =>
+                                'Der Bot spielt nahezu perfekt – echte Herausforderung!',
+                              _ =>
+                                'Ausgeglichenes Duell mit gelegentlichen Fehlern.',
+                            },
+                            style: const TextStyle(
+                                fontSize: 12, color: Colors.grey),
                           ),
                         ],
                       ),
@@ -364,7 +378,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       height: 36,
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
-                                        color: const Color(0xFF39FF14).withOpacity(0.12),
+                                        color: const Color(0xFF39FF14).withValues(alpha: 0.12),
                                       ),
                                       child: const Icon(
                                         Icons.person_rounded,
@@ -489,16 +503,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  String _gameDisplayName(String key) {
-    switch (key) {
-      case 'tictactoe': return 'Tic-Tac-Toe';
-      case 'connect4': return 'Vier Gewinnt';
-      case 'battleship': return 'Schiffe Versenken';
-      case 'rockpaperscissors': return 'Schere, Stein, Papier';
-      case 'minigolf': return 'Minigolf';
-      default: return key;
-    }
-  }
+  String _gameDisplayName(String key) =>
+      ConnectivityService.gameNames[key] ?? key;
 
   Widget _buildSectionHeader(BuildContext context, String title) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
