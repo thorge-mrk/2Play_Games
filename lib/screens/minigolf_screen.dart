@@ -686,7 +686,7 @@ class _MinigolfScreenState extends State<MinigolfScreen>
     final connService = Provider.of<ConnectivityService>(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    if (!connService.isConnected) {
+    if (!connService.hasSession) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           Navigator.of(context).popUntil((route) => route.isFirst);
@@ -802,7 +802,12 @@ class _MinigolfScreenState extends State<MinigolfScreen>
   }
 
   Widget _buildBottomControls(bool isBallStationary, bool isDark) {
-    if (!_isTournamentMode && _strokeCount == 0 && isBallStationary) {
+    // Level selection is only possible while NOBODY has played the hole
+    // yet – no skipping around while the opponent is mid-game.
+    if (!_isTournamentMode &&
+        _strokeCount == 0 &&
+        _opponentStrokeCount == 0 &&
+        isBallStationary) {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 4.0),
         child: Row(
@@ -1021,6 +1026,9 @@ class _MinigolfScreenState extends State<MinigolfScreen>
           _nextLevel();
         }
       },
+      // No skipping ahead: the next hole only unlocks once the
+      // opponent has finished the current one too.
+      waitingForRematch: opponentStillPlaying,
       rematchLabel:
           _isTournamentMode && isLastHole ? 'Turnier abschließen' : 'Nächstes Loch',
     );

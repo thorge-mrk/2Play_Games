@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
@@ -32,6 +33,7 @@ class GameHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final fg = isDark ? Colors.white70 : Colors.black87;
+    final svc = context.watch<ConnectivityService>();
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -56,7 +58,17 @@ class GameHeader extends StatelessWidget {
                     color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
-                if (subtitle != null)
+                if (svc.isReconnecting)
+                  const Text(
+                    '⚠ Verbindung wird wiederhergestellt...',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.orangeAccent),
+                  )
+                else if (subtitle != null)
                   Text(
                     subtitle!,
                     maxLines: 1,
@@ -261,7 +273,10 @@ Future<bool> showExitGameDialog(BuildContext context) async {
 
 /// Full-screen result overlay (win / lose / draw) with "Beenden" and
 /// "Revanche" actions, shared by all games.
-class GameResultOverlay extends StatelessWidget {
+///
+/// The overlay reveals itself after [revealDelay] so players can still see
+/// the final board/result before the dialog covers it.
+class GameResultOverlay extends StatefulWidget {
   final String title;
   final String description;
   final Color color;
@@ -271,6 +286,7 @@ class GameResultOverlay extends StatelessWidget {
   final VoidCallback onRematch;
   final bool waitingForRematch;
   final String rematchLabel;
+  final Duration revealDelay;
 
   const GameResultOverlay({
     super.key,
@@ -283,12 +299,42 @@ class GameResultOverlay extends StatelessWidget {
     required this.onRematch,
     this.waitingForRematch = false,
     this.rematchLabel = 'Revanche',
+    this.revealDelay = const Duration(milliseconds: 1600),
   });
+
+  @override
+  State<GameResultOverlay> createState() => _GameResultOverlayState();
+}
+
+class _GameResultOverlayState extends State<GameResultOverlay> {
+  bool _visible = false;
+  Timer? _revealTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _revealTimer = Timer(widget.revealDelay, () {
+      if (mounted) setState(() => _visible = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _revealTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    // Let the final board/result stay visible until the delay elapses.
+    if (!_visible) return const SizedBox.shrink();
+
+    return _buildOverlay(isDark);
+  }
+
+  Widget _buildOverlay(bool isDark) {
     return Positioned.fill(
       child: Container(
         color: Colors.black.withValues(alpha: 0.75),
@@ -302,12 +348,12 @@ class GameResultOverlay extends StatelessWidget {
                 color: isDark ? AppTheme.darkCard : Colors.white,
                 borderRadius: BorderRadius.circular(28),
                 border: Border.all(
-                  color: color.withValues(alpha: 0.6),
+                  color: widget.color.withValues(alpha: 0.6),
                   width: 2,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: color.withValues(alpha: 0.2),
+                    color: widget.color.withValues(alpha: 0.2),
                     blurRadius: 20,
                     spreadRadius: 2,
                   ),
@@ -316,7 +362,7 @@ class GameResultOverlay extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(icon, size: 64, color: color)
+                  Icon(widget.icon, size: 64, color: widget.color)
                       .animate()
                       .scaleXY(
                           begin: 0.6,
@@ -325,27 +371,27 @@ class GameResultOverlay extends StatelessWidget {
                           curve: Curves.elasticOut),
                   const SizedBox(height: 16),
                   Text(
-                    title,
+                    widget.title,
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 2,
-                      color: color,
+                      color: widget.color,
                     ),
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    description,
+                    widget.description,
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 14,
                       color: isDark ? Colors.white70 : Colors.black87,
                     ),
                   ),
-                  if (extra != null) ...[
+                  if (widget.extra != null) ...[
                     const SizedBox(height: 8),
-                    extra!,
+                    widget.extra!,
                   ],
                   const SizedBox(height: 24),
                   Row(
@@ -360,7 +406,7 @@ class GameResultOverlay extends StatelessWidget {
                                 borderRadius: BorderRadius.circular(14)),
                             padding: const EdgeInsets.symmetric(vertical: 12),
                           ),
-                          onPressed: onExit,
+                          onPressed: widget.onExit,
                           child: Text(
                             'Beenden',
                             style: TextStyle(
@@ -379,15 +425,17 @@ class GameResultOverlay extends StatelessWidget {
                                 borderRadius: BorderRadius.circular(14)),
                             padding: const EdgeInsets.symmetric(vertical: 12),
                           ),
-                          onPressed: waitingForRematch ? null : onRematch,
-                          child: waitingForRematch
+                          onPressed: widget.waitingForRematch
+                              ? null
+                              : widget.onRematch,
+                          child: widget.waitingForRematch
                               ? const SizedBox(
                                   width: 18,
                                   height: 18,
                                   child: CircularProgressIndicator(
                                       strokeWidth: 2, color: Colors.white),
                                 )
-                              : Text(rematchLabel,
+                              : Text(widget.rematchLabel,
                                   style: const TextStyle(
                                       fontWeight: FontWeight.bold)),
                         ),
